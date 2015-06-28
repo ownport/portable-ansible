@@ -33,6 +33,7 @@ module: os_server
 short_description: Create/Delete Compute Instances from OpenStack
 extends_documentation_fragment: openstack
 version_added: "2.0"
+author: "Monty Taylor (@emonty)"
 description:
    - Create or Remove compute instances from OpenStack.
 options:
@@ -240,7 +241,8 @@ EXAMPLES = '''
 
 def _exit_hostvars(module, cloud, server, changed=True):
     hostvars = meta.get_hostvars_from_server(cloud, server)
-    module.exit_json(changed=changed, id=server.id, openstack=hostvars)
+    module.exit_json(
+        changed=changed, server=server, id=server.id, openstack=hostvars)
 
 
 def _network_args(module, cloud):

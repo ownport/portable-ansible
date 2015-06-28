@@ -59,10 +59,10 @@ options:
     version_added: "1.5"
   ports:
     description:
-      - List containing private to public port mapping specification. Use docker
-      - 'CLI-style syntax: C(8000), C(9000:8000), or C(0.0.0.0:9000:8000)'
-      - where  8000 is a container port, 9000 is a host port, and 0.0.0.0 is
-      - a host interface.
+      - "List containing private to public port mapping specification.
+        Use docker 'CLI-style syntax: C(8000), C(9000:8000), or C(0.0.0.0:9000:8000)'
+        where 8000 is a container port, 9000 is a host port, and 0.0.0.0 is - a host interface.
+        The container ports need to be exposed either in the Dockerfile or via the C(expose) option."
     default: null
     version_added: "1.5"
   expose:
@@ -92,6 +92,23 @@ options:
       - 'alias. Use docker CLI-style syntax: C(redis:myredis).'
     default: null
     version_added: "1.5"
+  log_driver:
+    description:
+      - You can specify a different logging driver for the container than for the daemon.
+        "json-file" Default logging driver for Docker. Writes JSON messages to file.
+        docker logs command is available only for this logging driver.
+        "none" disables any logging for the container. docker logs won't be available with this driver.
+        "syslog" Syslog logging driver for Docker. Writes log messages to syslog.
+        docker logs command is not available for this logging driver.
+        If not defined explicitly, the Docker daemon's default ("json-file") will apply.
+        Requires docker >= 1.6.0.
+    required: false
+    default: json-file
+    choices:
+      - json-file
+      - none
+      - syslog
+    version_added: "2.0"
   memory_limit:
     description:
       - RAM allocated to the container as a number of bytes or as a human-readable
@@ -256,7 +273,11 @@ options:
     default: false
     version_added: "1.9"
 
-author: Cove Schneider, Joshua Conner, Pavel Antonov, Ash Wilson
+author: 
+    - "Cove Schneider (@cove)"
+    - "Joshua Conner (@joshuaconner)"
+    - "Pavel Antonov (@softzilla)"
+    - "Ash Wilson (@smashwilson)"
 requirements:
     - "python >= 2.6"
     - "docker-py >= 0.3.0"
@@ -506,6 +527,7 @@ class DockerManager(object):
             'restart_policy': ((0, 5, 0), '1.14'),
             'extra_hosts': ((0, 7, 0), '1.3.1'),
             'pid': ((1, 0, 0), '1.17'),
+            'log_driver': ((1, 2, 0), '1.18'),
             # Clientside only
             'insecure_registry': ((0, 5, 0), '0.0')
             }
@@ -1110,6 +1132,16 @@ class DockerManager(object):
                 self.reload_reasons.append('volumes_from ({0} => {1})'.format(actual_volumes_from, expected_volumes_from))
                 differing.append(container)
 
+            # LOG_DRIVER
+
+            if self.ensure_capability('log_driver', False) :
+                expected_log_driver = self.module.params.get('log_driver') or 'json-file'
+                actual_log_driver = container['HostConfig']['LogConfig']['Type']
+                if actual_log_driver != expected_log_driver:
+                    self.reload_reasons.append('log_driver ({0} => {1})'.format(actual_log_driver, expected_log_driver))
+                    differing.append(container)
+                    continue
+
         return differing
 
     def get_deployed_containers(self):
@@ -1206,44 +1238,7 @@ class DockerManager(object):
         except Exception as e:
             self.module.fail_json(msg="Failed to pull the specified image: %s" % resource, error=repr(e))
 
-    def create_containers(self, count=1):
-        try:
-            mem_limit = _human_to_bytes(self.module.params.get('memory_limit'))
-        except ValueError as e:
-            self.module.fail_json(msg=str(e))
-
-        params = {'image':        self.module.params.get('image'),
-                  'command':      self.module.params.get('command'),
-                  'ports':        self.exposed_ports,
-                  'volumes':      self.volumes,
-                  'mem_limit':    mem_limit,
-                  'environment':  self.env,
-                  'hostname':     self.module.params.get('hostname'),
-                  'domainname':   self.module.params.get('domainname'),
-                  'detach':       self.module.params.get('detach'),
-                  'name':         self.module.params.get('name'),
-                  'stdin_open':   self.module.params.get('stdin_open'),
-                  'tty':          self.module.params.get('tty'),
-                  }
-
-        def do_create(count, params):
-            results = []
-            for _ in range(count):
-                result = self.client.create_container(**params)
-                self.increment_counter('created')
-                results.append(result)
-
-            return results
-
-        try:
-            containers = do_create(count, params)
-        except:
-            self.pull_image()
-            containers = do_create(count, params)
-
-        return containers
-
-    def start_containers(self, containers):
+    def create_host_config(self):
         params = {
             'lxc_conf': self.lxc_conf,
             'binds': self.binds,
@@ -1256,7 +1251,7 @@ class DockerManager(object):
 
         optionals = {}
         for optional_param in ('dns', 'volumes_from', 'restart_policy',
-                'restart_policy_retry', 'pid', 'extra_hosts'):
+                'restart_policy_retry', 'pid', 'extra_hosts', 'log_driver'):
             optionals[optional_param] = self.module.params.get(optional_param)
 
         if optionals['dns'] is not None:
@@ -1281,8 +1276,55 @@ class DockerManager(object):
             self.ensure_capability('extra_hosts')
             params['extra_hosts'] = optionals['extra_hosts']
 
+        if optionals['log_driver'] is not None:
+            self.ensure_capability('log_driver')
+            log_config = docker.utils.LogConfig(type=docker.utils.LogConfig.types.JSON)
+            log_config.type = optionals['log_driver']
+            params['log_config'] = log_config
+
+        return docker.utils.create_host_config(**params)
+
+    def create_containers(self, count=1):
+        try:
+            mem_limit = _human_to_bytes(self.module.params.get('memory_limit'))
+        except ValueError as e:
+            self.module.fail_json(msg=str(e))
+
+        params = {'image':        self.module.params.get('image'),
+                  'command':      self.module.params.get('command'),
+                  'ports':        self.exposed_ports,
+                  'volumes':      self.volumes,
+                  'mem_limit':    mem_limit,
+                  'environment':  self.env,
+                  'hostname':     self.module.params.get('hostname'),
+                  'domainname':   self.module.params.get('domainname'),
+                  'detach':       self.module.params.get('detach'),
+                  'name':         self.module.params.get('name'),
+                  'stdin_open':   self.module.params.get('stdin_open'),
+                  'tty':          self.module.params.get('tty'),
+                  'host_config':  self.create_host_config(),
+                  }
+
+        def do_create(count, params):
+            results = []
+            for _ in range(count):
+                result = self.client.create_container(**params)
+                self.increment_counter('created')
+                results.append(result)
+
+            return results
+
+        try:
+            containers = do_create(count, params)
+        except:
+            self.pull_image()
+            containers = do_create(count, params)
+
+        return containers
+
+    def start_containers(self, containers):
         for i in containers:
-            self.client.start(i['Id'], **params)
+            self.client.start(i)
             self.increment_counter('started')
 
     def stop_containers(self, containers):
@@ -1475,6 +1517,7 @@ def main():
             net             = dict(default=None),
             pid             = dict(default=None),
             insecure_registry = dict(default=False, type='bool'),
+            log_driver      = dict(default=None, choices=['json-file', 'none', 'syslog']),
         ),
         required_together = (
             ['tls_client_cert', 'tls_client_key'],

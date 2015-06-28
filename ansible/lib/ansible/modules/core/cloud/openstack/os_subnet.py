@@ -29,6 +29,7 @@ module: os_subnet
 short_description: Add/Remove subnet to an OpenStack network
 extends_documentation_fragment: openstack
 version_added: "2.0"
+author: "Monty Taylor (@emonty)"
 description:
    - Add or Remove a subnet to an OpenStack network
 options:
@@ -173,6 +174,7 @@ def main():
         allocation_pool_start=dict(default=None),
         allocation_pool_end=dict(default=None),
         host_routes=dict(default=None, type='list'),
+        state=dict(default='present', choices=['absent', 'present']),
     )
 
     module_kwargs = openstack_module_kwargs()
@@ -225,7 +227,7 @@ def main():
                                              dns_nameservers=dns,
                                              allocation_pools=pool,
                                              host_routes=host_routes)
-                module.exit_json(changed=True, result="created")
+                changed = True
             else:
                 if _needs_update(subnet, module):
                     cloud.update_subnet(subnet['id'],
@@ -235,16 +237,18 @@ def main():
                                         dns_nameservers=dns,
                                         allocation_pools=pool,
                                         host_routes=host_routes)
-                    module.exit_json(changed=True, result="updated")
+                    changed = True
                 else:
-                    module.exit_json(changed=False, result="success")
+                    changed = False
+            module.exit_json(changed=changed)
 
         elif state == 'absent':
             if not subnet:
-                module.exit_json(changed=False, result="success")
+                changed = False
             else:
+                changed = True
                 cloud.delete_subnet(subnet_name)
-                module.exit_json(changed=True, result="deleted")
+            module.exit_json(changed=changed)
 
     except shade.OpenStackCloudException as e:
         module.fail_json(msg=e.message)

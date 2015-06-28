@@ -76,6 +76,14 @@ options:
     required: false
     default: null
     aliases: []
+  spot_type:
+    version_added: "2.0"
+    description:
+      - Type of spot request; one of "one-time" or "persistent". Defaults to "one-time" if not supplied.
+    required: false
+    default: "one-time"
+    choices: [ "one-time", "persistent" ]
+    aliases: []
   image:
     description:
        - I(ami) ID to use for the instance
@@ -190,6 +198,13 @@ options:
     required: false
     default: yes
     choices: [ "yes", "no" ]
+  termination_protection:
+    version_added: "2.0"
+    description:
+      - Enable or Disable the Termination Protection
+    required: false
+    default: no
+    choices: [ "yes", "no" ]
   state:
     version_added: "1.3"
     description:
@@ -201,7 +216,7 @@ options:
   volumes:
     version_added: "1.5"
     description:
-      - a list of volume dicts, each containing device name and optionally ephemeral id or snapshot id. Size and type (and number of iops for io device type) must be specified for a new volume or a root volume, and may be passed for a snapshot volume. For any volume, a volume size less than 1 will be interpreted as a request not to create the volume.
+      - "a list of volume dicts, each containing device name and optionally ephemeral id or snapshot id. Size and type (and number of iops for io device type) must be specified for a new volume or a root volume, and may be passed for a snapshot volume. For any volume, a volume size less than 1 will be interpreted as a request not to create the volume. Encrypt the volume by passing 'encrypted: true' in the volume dict."
     required: false
     default: null
     aliases: []
@@ -226,7 +241,10 @@ options:
     default: null
     aliases: []
 
-author: Seth Vidal, Tim Gerla, Lester Wade
+author: 
+    - "Tim Gerla (@tgerla)"
+    - "Lester Wade (@lwade)"
+    - "Seth Vidal"
 extends_documentation_fragment: aws
 '''
 
@@ -610,6 +628,19 @@ def get_instance_info(inst):
         instance_info['ebs_optimized'] = False
 
     try:
+        bdm_dict = {}
+        bdm = getattr(inst, 'block_device_mapping')
+        for device_name in bdm.keys():
+            bdm_dict[device_name] = {
+                'status': bdm[device_name].status,
+                'volume_id': bdm[device_name].volume_id,
+                'delete_on_termination': bdm[device_name].delete_on_termination
+            }
+        instance_info['block_device_mapping'] = bdm_dict
+    except AttributeError:
+        instance_info['block_device_mapping'] = False
+
+    try:
         instance_info['tenancy'] = getattr(inst, 'placement_tenancy')
     except AttributeError:
         instance_info['tenancy'] = 'default'
@@ -669,7 +700,8 @@ def create_block_device(module, ec2, volume):
                            size=volume.get('volume_size'),
                            volume_type=volume.get('device_type'),
                            delete_on_termination=volume.get('delete_on_termination', False),
-                           iops=volume.get('iops'))
+                           iops=volume.get('iops'),
+                           encrypted=volume.get('encrypted', False))
 
 def boto_supports_param_in_spot_request(ec2, param):
     """
@@ -759,6 +791,7 @@ def create_instances(module, ec2, vpc, override_count=None):
     instance_type = module.params.get('instance_type')
     tenancy = module.params.get('tenancy')
     spot_price = module.params.get('spot_price')
+    spot_type = module.params.get('spot_type')
     image = module.params.get('image')
     if override_count:
         count = override_count
@@ -782,6 +815,7 @@ def create_instances(module, ec2, vpc, override_count=None):
     exact_count = module.params.get('exact_count')
     count_tag = module.params.get('count_tag')
     source_dest_check = module.boolean(module.params.get('source_dest_check'))
+    termination_protection = module.boolean(module.params.get('termination_protection'))
 
     # group_id and group_name are exclusive of each other
     if group_id and group_name:
@@ -951,6 +985,7 @@ def create_instances(module, ec2, vpc, override_count=None):
 
                 params.update(dict(
                     count = count_remaining,
+                    type = spot_type,
                 ))
                 res = ec2.request_spot_instances(spot_price, **params)
 
@@ -1010,10 +1045,15 @@ def create_instances(module, ec2, vpc, override_count=None):
         for res in res_list:
             running_instances.extend(res.instances)
 
-        # Enabled by default by Amazon
-        if not source_dest_check:
+        # Enabled by default by AWS
+        if source_dest_check is False:
             for inst in res.instances:
                 inst.modify_attribute('sourceDestCheck', False)
+
+        # Disabled by default by AWS
+        if termination_protection is True:
+            for inst in res.instances:
+                inst.modify_attribute('disableApiTermination', True)
 
         # Leave this as late as possible to try and avoid InvalidInstanceID.NotFound
         if instance_tags:
@@ -1025,6 +1065,7 @@ def create_instances(module, ec2, vpc, override_count=None):
     instance_dict_array = []
     created_instance_ids = []
     for inst in running_instances:
+        inst.update()
         d = get_instance_info(inst)
         created_instance_ids.append(inst.id)
         instance_dict_array.append(d)
@@ -1130,21 +1171,32 @@ def startstop_instances(module, ec2, instance_ids, state):
     if not isinstance(instance_ids, list) or len(instance_ids) < 1:
         module.fail_json(msg='instance_ids should be a list of instances, aborting')
 
-    # Check that our instances are not in the state we want to take them to
-    # and change them to our desired state
+    # Check (and eventually change) instances attributes and instances state
     running_instances_array = []
     for res in ec2.get_all_instances(instance_ids):
         for inst in res.instances:
-           if inst.state != state:
-               instance_dict_array.append(get_instance_info(inst))
-               try:
-                   if state == 'running':
-                       inst.start()
-                   else:
-                       inst.stop()
-               except EC2ResponseError, e:
-                   module.fail_json(msg='Unable to change state for instance {0}, error: {1}'.format(inst.id, e))
-               changed = True
+
+            # Check "source_dest_check" attribute
+            if inst.get_attribute('sourceDestCheck')['sourceDestCheck'] != source_dest_check:
+                inst.modify_attribute('sourceDestCheck', source_dest_check)
+                changed = True
+
+            # Check "termination_protection" attribute
+            if inst.get_attribute('disableApiTermination')['disableApiTermination'] != termination_protection:
+                inst.modify_attribute('disableApiTermination', termination_protection)
+                changed = True
+
+            # Check instance state
+            if inst.state != state:
+                instance_dict_array.append(get_instance_info(inst))
+                try:
+                    if state == 'running':
+                        inst.start()
+                    else:
+                        inst.stop()
+                except EC2ResponseError, e:
+                    module.fail_json(msg='Unable to change state for instance {0}, error: {1}'.format(inst.id, e))
+                changed = True
 
     ## Wait for all the instances to finish starting or stopping
     wait_timeout = time.time() + wait_timeout
@@ -1178,6 +1230,7 @@ def main():
             zone = dict(aliases=['aws_zone', 'ec2_zone']),
             instance_type = dict(aliases=['type']),
             spot_price = dict(),
+            spot_type = dict(default='one-time', choices=["one-time", "persistent"]),
             image = dict(),
             kernel = dict(),
             count = dict(type='int', default='1'),
@@ -1195,7 +1248,8 @@ def main():
             instance_profile_name = dict(),
             instance_ids = dict(type='list', aliases=['instance_id']),
             source_dest_check = dict(type='bool', default=True),
-            state = dict(default='present'),
+            termination_protection = dict(type='bool', default=False),
+            state = dict(default='present', choices=['present', 'absent', 'running', 'stopped']),
             exact_count = dict(type='int', default=None),
             count_tag = dict(),
             volumes = dict(type='list'),

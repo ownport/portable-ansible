@@ -63,7 +63,7 @@ options:
         required: false
         default: 'yes'
         choices: ['yes', 'no']
-author: Alexander Saltanov
+author: "Alexander Saltanov (@sashka)"
 version_added: "0.7"
 requirements: [ python-apt ]
 '''
@@ -126,6 +126,8 @@ class InvalidSource(Exception):
 class SourcesList(object):
     def __init__(self):
         self.files = {}  # group sources by file
+        # Repositories that we're adding -- used to implement mode param
+        self.new_repos = set()
         self.default_file = self._apt_cfg_file('Dir::Etc::sourcelist')
 
         # read sources.list if it exists
@@ -238,10 +240,6 @@ class SourcesList(object):
                 d, fn = os.path.split(filename)
                 fd, tmp_path = tempfile.mkstemp(prefix=".%s-" % fn, dir=d)
 
-                # allow the user to override the default mode
-                this_mode = module.params['mode']
-                module.set_mode_if_different(tmp_path, this_mode, False)
-
                 f = os.fdopen(fd, 'w')
                 for n, valid, enabled, source, comment in sources:
                     chunks = []
@@ -259,6 +257,11 @@ class SourcesList(object):
                     except IOError, err:
                         module.fail_json(msg="Failed to write to file %s: %s" % (tmp_path, unicode(err)))
                 module.atomic_move(tmp_path, filename)
+
+                # allow the user to override the default mode
+                if filename in self.new_repos:
+                    this_mode = module.params['mode']
+                    module.set_mode_if_different(filename, this_mode, False)
             else:
                 del self.files[filename]
                 if os.path.exists(filename):
@@ -300,6 +303,7 @@ class SourcesList(object):
 
             files = self.files[file]
             files.append((len(files), True, True, source_new, comment_new))
+            self.new_repos.add(file)
 
     def add_source(self, line, comment='', file=None):
         source = self._parse(line, raise_if_invalid_or_disabled=True)[2]

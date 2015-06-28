@@ -132,10 +132,19 @@ options:
     description:
       - all arguments accepted by the M(file) module also work here
     required: false
+  validate_certs:
+    description:
+      - If C(no), SSL certificates will not be validated.  This should only
+        set to C(no) used on personally controlled sites using self-signed
+        certificates.  Prior to 1.9.2 the code defaulted to C(no).
+    required: false
+    default: 'yes'
+    choices: ['yes', 'no']
+    version_added: '1.9.2'
 
 # informational: requirements for nodes
 requirements: [ urlparse, httplib2 ]
-author: Romeo Theriault
+author: "Romeo Theriault (@romeotheriault)"
 '''
 
 EXAMPLES = '''
@@ -147,31 +156,45 @@ EXAMPLES = '''
   register: webpage
 
 - action: fail
-  when: 'AWESOME' not in "{{ webpage.content }}"
+  when: "'illustrative' not in webpage.content"
 
 
 # Create a JIRA issue
-
-- uri: url=https://your.jira.example.com/rest/api/2/issue/ 
-       method=POST user=your_username password=your_pass 
-       body="{{ lookup('file','issue.json') }}" force_basic_auth=yes 
-       status_code=201 HEADER_Content-Type="application/json"  
+- uri:
+    url: https://your.jira.example.com/rest/api/2/issue/ 
+    method: POST
+    user: your_username 
+    password: your_pass 
+    body: "{{ lookup('file','issue.json') }}"
+    force_basic_auth: yes 
+    status_code: 201
+    body_format: json 
 
 # Login to a form based webpage, then use the returned cookie to
 # access the app in later tasks
 
-- uri: url=https://your.form.based.auth.examle.com/index.php 
-       method=POST body="name=your_username&password=your_password&enter=Sign%20in" 
-       status_code=302 HEADER_Content-Type="application/x-www-form-urlencoded"
+- uri:
+    url: https://your.form.based.auth.examle.com/index.php 
+    method: POST
+    body: "name=your_username&password=your_password&enter=Sign%20in" 
+    status_code: 302
+    HEADER_Content-Type: "application/x-www-form-urlencoded"
   register: login
 
-- uri: url=https://your.form.based.auth.example.com/dashboard.php
-       method=GET return_content=yes HEADER_Cookie="{{login.set_cookie}}"
-            
-# Queue build of a project in Jenkins:
+- uri:
+    url: https://your.form.based.auth.example.com/dashboard.php
+    method: GET
+    return_content: yes
+    HEADER_Cookie: "{{login.set_cookie}}"
 
-- uri: url=http://{{jenkins.host}}/job/{{jenkins.job}}/build?token={{jenkins.token}} 
-       method=GET user={{jenkins.user}} password={{jenkins.password}} force_basic_auth=yes status_code=201
+# Queue build of a project in Jenkins:
+- uri:
+    url: "http://{{ jenkins.host }}/job/{{ jenkins.job }}/build?token={{ jenkins.token }}" 
+    method: GET
+    user: "{{ jenkins.user }}"
+    password: "{{ jenkins.password }}"
+    force_basic_auth: yes
+    status_code: 201
 
 '''
 
@@ -244,7 +267,7 @@ def url_filename(url):
     return fn
 
 
-def uri(module, url, dest, user, password, body, body_format, method, headers, redirects, socket_timeout):
+def uri(module, url, dest, user, password, body, body_format, method, headers, redirects, socket_timeout, validate_certs):
     # To debug
     #httplib2.debug = 4
 
@@ -260,7 +283,8 @@ def uri(module, url, dest, user, password, body, body_format, method, headers, r
         follow_all_redirects = False
 
     # Create a Http object and set some default options.
-    h = httplib2.Http(disable_ssl_certificate_validation=True, timeout=socket_timeout)
+    disable_validation = not validate_certs
+    h = httplib2.Http(disable_ssl_certificate_validation=disable_validation, timeout=socket_timeout)
     h.follow_all_redirects = follow_all_redirects
     h.follow_redirects = follow_redirects
     h.forward_authorization_headers = True
@@ -326,6 +350,10 @@ def uri(module, url, dest, user, password, body, body_format, method, headers, r
         module.fail_json(msg="The server requested a type of HMACDigest authentication that we are unfamiliar with.")
     except httplib2.UnimplementedHmacDigestAuthOptionError:
         module.fail_json(msg="The server requested a type of HMACDigest authentication that we are unfamiliar with.")
+    except httplib2.CertificateHostnameMismatch:
+        module.fail_json(msg="The server's certificate does not match with its hostname.")
+    except httplib2.SSLHandshakeError:
+        module.fail_json(msg="Unable to validate server's certificate against available CA certs.")
     except socket.error, e:
         module.fail_json(msg="Socket error: %s to %s" % (e, url))
 
@@ -347,6 +375,7 @@ def main():
             removes = dict(required=False, default=None),
             status_code = dict(required=False, default=[200], type='list'),
             timeout = dict(required=False, default=30, type='int'),
+            validate_certs = dict(required=False, default=True, type='bool'),
         ),
         check_invalid_arguments=False,
         add_file_common_args=True
@@ -371,6 +400,7 @@ def main():
     removes = module.params['removes']
     status_code = [int(x) for x in list(module.params['status_code'])]
     socket_timeout = module.params['timeout']
+    validate_certs = module.params['validate_certs']
 
     dict_headers = {}
 
@@ -412,7 +442,7 @@ def main():
 
 
     # Make the request
-    resp, content, dest = uri(module, url, dest, user, password, body, body_format, method, dict_headers, redirects, socket_timeout)
+    resp, content, dest = uri(module, url, dest, user, password, body, body_format, method, dict_headers, redirects, socket_timeout, validate_certs)
     resp['status'] = int(resp['status'])
 
     # Write the file out if requested

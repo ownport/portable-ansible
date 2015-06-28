@@ -107,7 +107,7 @@ options:
     default: present
     choices: ['absent', 'present', 'list']
     version_added: "1.6"
-author: Lester Wade
+author: "Lester Wade (@lwade)"
 extends_documentation_fragment: aws
 '''
 
@@ -160,8 +160,8 @@ EXAMPLES = '''
     instance: "{{ item.id }}"
     name: my_existing_volume_Name_tag
     device_name: /dev/xvdf
-    with_items: ec2.instances
-    register: ec2_vol
+  with_items: ec2.instances
+  register: ec2_vol
 
 # Remove a volume
 - ec2_vol:
@@ -239,15 +239,14 @@ def get_volumes(module, ec2):
     return vols
 
 def delete_volume(module, ec2):
-    vol = get_volume(module, ec2)
-    if not vol:
-        module.exit_json(changed=False)
-    else:
-       if vol.attachment_state() is not None: 
-           adata = vol.attach_data
-           module.fail_json(msg="Volume %s is attached to an instance %s." % (vol.id, adata.instance_id))
-       ec2.delete_volume(vol.id)
-       module.exit_json(changed=True)
+    volume_id = module.params['id']
+    try:
+        ec2.delete_volume(volume_id)
+        module.exit_json(changed=True)
+    except boto.exception.EC2ResponseError as ec2_error:
+        if ec2_error.code == 'InvalidVolume.NotFound':
+            module.exit_json(changed=False)
+        module.fail_json(msg=ec2_error.message)
 
 def boto_supports_volume_encryption():
     """

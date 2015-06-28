@@ -137,7 +137,7 @@ notes:
      to all users. You may not specify password or role_attr_flags when the
      PUBLIC user is specified.
 requirements: [ psycopg2 ]
-author: Lorin Hochstein
+author: "Lorin Hochstein (@lorin)"
 '''
 
 EXAMPLES = '''
@@ -444,6 +444,9 @@ def revoke_privileges(cursor, user, privs):
 def grant_privileges(cursor, user, privs):
     if privs is None:
         return False
+
+    grant_funcs = dict(table=grant_table_privileges, database=grant_database_privileges)
+    check_funcs = dict(table=has_table_privileges, database=has_database_privileges)
 
     grant_funcs = dict(table=grant_table_privileges, database=grant_database_privileges)
     check_funcs = dict(table=has_table_privileges, database=has_database_privileges)

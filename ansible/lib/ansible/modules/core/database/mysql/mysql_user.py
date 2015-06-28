@@ -120,7 +120,7 @@ notes:
      the file."
 
 requirements: [ "MySQLdb" ]
-author: Mark Theunissen
+author: "Mark Theunissen (@marktheunissen)"
 '''
 
 EXAMPLES = """
@@ -149,8 +149,6 @@ mydb.*:INSERT,UPDATE/anotherdb.*:SELECT/yetanotherdb.*:ALL
 - mysql_user: name=root password=abc123 login_unix_socket=/var/run/mysqld/mysqld.sock
 
 # Example .my.cnf file for setting the root password
-# Note: don't use quotes around the password, because the mysql_user module
-# will include them in the password but the mysql client will not
 
 [client]
 user=root
@@ -159,6 +157,7 @@ password=n<_665{vS43y
 
 import getpass
 import tempfile
+import re
 try:
     import MySQLdb
 except ImportError:
@@ -245,7 +244,7 @@ def user_mod(cursor, user, host, password, new_priv, append_privs):
                 grant_option = True
             if db_table not in new_priv:
                 if user != "root" and "PROXY" not in priv and not append_privs:
-                    privileges_revoke(cursor, user,host,db_table,grant_option)
+                    privileges_revoke(cursor, user,host,db_table,priv,grant_option)
                     changed = True
 
         # If the user doesn't currently have any privileges on a db.table, then
@@ -262,7 +261,7 @@ def user_mod(cursor, user, host, password, new_priv, append_privs):
             priv_diff = set(new_priv[db_table]) ^ set(curr_priv[db_table])
             if (len(priv_diff) > 0):
                 if not append_privs:
-                    privileges_revoke(cursor, user,host,db_table,grant_option)
+                    privileges_revoke(cursor, user,host,db_table,curr_priv[db_table],grant_option)
                 privileges_grant(cursor, user,host,db_table,new_priv[db_table])
                 changed = True
 
@@ -318,17 +317,19 @@ def privileges_unpack(priv):
     not specified in the string, as MySQL will always provide this by default.
     """
     output = {}
+    privs = []
     for item in priv.strip().split('/'):
         pieces = item.strip().split(':')
-        if '.' in pieces[0]:
-            pieces[0] = pieces[0].split('.')
-            for idx, piece in enumerate(pieces):
-                if pieces[0][idx] != "*":
-                    pieces[0][idx] = "`" + pieces[0][idx] + "`"
-            pieces[0] = '.'.join(pieces[0])
-
-        output[pieces[0]] = pieces[1].upper().split(',')
-        new_privs = frozenset(output[pieces[0]])
+        dbpriv = pieces[0].rsplit(".", 1)
+        pieces[0] = "`%s`.%s" % (dbpriv[0].strip('`'), dbpriv[1])
+        if '(' in pieces[1]:
+            output[pieces[0]] = re.split(r',\s*(?=[^)]*(?:\(|$))', pieces[1].upper())
+            for i in output[pieces[0]]:
+                privs.append(re.sub(r'\(.*\)','',i))
+        else:
+            output[pieces[0]] = pieces[1].upper().split(',')
+            privs = output[pieces[0]]
+        new_privs = frozenset(privs)
         if not new_privs.issubset(VALID_PRIVS):
             raise InvalidPrivsError('Invalid privileges specified: %s' % new_privs.difference(VALID_PRIVS))
 
@@ -342,7 +343,7 @@ def privileges_unpack(priv):
 
     return output
 
-def privileges_revoke(cursor, user,host,db_table,grant_option):
+def privileges_revoke(cursor, user,host,db_table,priv,grant_option):
     # Escape '%' since mysql db.execute() uses a format string
     db_table = db_table.replace('%', '%%')
     if grant_option:
@@ -350,7 +351,8 @@ def privileges_revoke(cursor, user,host,db_table,grant_option):
         query.append("FROM %s@%s")
         query = ' '.join(query)
         cursor.execute(query, (user, host))
-    query = ["REVOKE ALL PRIVILEGES ON %s" % mysql_quote_identifier(db_table, 'table')]
+    priv_string = ",".join([p for p in priv if p not in ('GRANT', 'REQUIRESSL')])
+    query = ["REVOKE %s ON %s" % (priv_string, mysql_quote_identifier(db_table, 'table'))]
     query.append("FROM %s@%s")
     query = ' '.join(query)
     cursor.execute(query, (user, host))
@@ -359,7 +361,7 @@ def privileges_grant(cursor, user,host,db_table,priv):
     # Escape '%' since mysql db.execute uses a format string and the
     # specification of db and table often use a % (SQL wildcard)
     db_table = db_table.replace('%', '%%')
-    priv_string = ",".join(filter(lambda x: x not in [ 'GRANT', 'REQUIRESSL' ], priv))
+    priv_string = ",".join([p for p in priv if p not in ('GRANT', 'REQUIRESSL')])
     query = ["GRANT %s ON %s" % (priv_string, mysql_quote_identifier(db_table, 'table'))]
     query.append("TO %s@%s")
     if 'GRANT' in priv:
@@ -382,7 +384,7 @@ def main():
             login_port=dict(default=3306, type='int'),
             login_unix_socket=dict(default=None),
             user=dict(required=True, aliases=['name']),
-            password=dict(default=None),
+            password=dict(default=None, no_log=True),
             host=dict(default="localhost"),
             state=dict(default="present", choices=["absent", "present"]),
             priv=dict(default=None),

@@ -32,7 +32,8 @@ options:
         I(auth_url), I(username), I(password), I(project_name) and any
         information about domains if the cloud supports them. For other plugins,
         this param will need to contain whatever parameters that auth plugin
-        requires. This parameter is not needed if a named cloud is provided.
+        requires. This parameter is not needed if a named cloud is provided or
+        OpenStack OS_* environment variables are present.
     required: false
   auth_plugin:
     description:
@@ -84,5 +85,6 @@ notes:
     can come from a yaml config file in /etc/ansible/openstack.yaml,
     /etc/openstack/clouds.yaml or ~/.config/openstack/clouds.yaml, then from
     standard environment variables, then finally by explicit parameters in
-    plays.
+    plays. More information can be found at
+    U(http://docs.openstack.org/developer/os-client-config)
 '''
