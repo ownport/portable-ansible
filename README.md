@@ -12,7 +12,7 @@ Few advantages of pull mode:
 - Very fast, because the SSH-connection overhead incurred for each task is avoided.
 
 
-Versions:
+## Versions:
 
 - Ansible, 1.9.2-1
 - Ansible-Modules-Core Snapshot
