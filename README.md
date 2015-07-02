@@ -1,6 +1,6 @@
 # ansible-without-install
 
-Ansible without requirements to be installed
+Ansible without requirements to be installed. The main purpose to be used in [Ansible Pull Mode](https://docs.ansible.com/playbooks_intro.html#ansible-pull).
 
 Versions:
 
