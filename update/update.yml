@@ -10,12 +10,14 @@
 
   tasks:
   - name: Create if not exists tmp/ directories structure
-    file: path=../tmp/ state=directory mode=755
+    file: path={{ item }} state=directory mode=755
+    with_items:
+      - "../tmp/"
+      - "../tmp/archive/"
+      - "../tmp/ansible/"
+      - "../tmp/ansible/bin/"
+      - "../tmp/ansible/lib/"
   
-  - file: path=../tmp/archive/ state=directory mode=755
-  - file: path=../tmp/ansible/ state=directory mode=755
-  - file: path=../tmp/ansible/bin/ state=directory mode=755
-  - file: path=../tmp/ansible/lib/ state=directory mode=755
   - file: path=../tmp/ansible/lib/__init__.py state=touch
 
   # ==========================================================
