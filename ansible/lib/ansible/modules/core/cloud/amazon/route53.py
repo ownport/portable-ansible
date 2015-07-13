@@ -35,6 +35,12 @@ options:
     required: true
     default: null
     aliases: []
+  hosted_zone_id:
+    description:
+      - The Hosted Zone ID of the DNS zone to modify
+    required: false
+    version_added: 2.0
+    default: null
   record:
     description:
       - The full DNS record to create or delete
@@ -132,6 +138,15 @@ options:
     required: false
     default: null
     version_added: "2.0"
+  vpc_id:
+    description:
+      - When used in conjunction with private_zone: true, this will only modify
+        records in the private hosted zone attached to this VPC. This allows you
+        to have multiple private hosted zones, all with the same name, attached
+        to different VPCs.
+    required: false
+    default: null
+    version_added: "2.0"
 author: "Bruce Pennypacker (@bpennypacker)"
 extends_documentation_fragment: aws
 '''
@@ -195,6 +210,28 @@ EXAMPLES = '''
       alias=True
       alias_hosted_zone_id="{{ elb_zone_id }}"
 
+# Add an AAAA record with Hosted Zone ID.  Note that because there are colons in the value
+# that the entire parameter list must be quoted:
+- route53:
+      command: "create"
+      zone: "foo.com"
+      hostes_zone_id: "Z2AABBCCDDEEFF"
+      record: "localhost.foo.com"
+      type: "AAAA"
+      ttl: "7200"
+      value: "::1"
+      
+# Add an AAAA record with Hosted Zone ID.  Note that because there are colons in the value
+# that the entire parameter list must be quoted:
+- route53:
+      command: "create"
+      zone: "foo.com"
+      hostes_zone_id: "Z2AABBCCDDEEFF"
+      record: "localhost.foo.com"
+      type: "AAAA"
+      ttl: "7200"
+      value: "::1"
+      
 # Use a routing policy to distribute traffic:
 - route53:
       command: "create"
@@ -222,14 +259,26 @@ try:
 except ImportError:
     HAS_BOTO = False
 
-def get_zone_by_name(conn, module, zone_name, want_private):
-    """Finds a zone by name"""
+def get_zone_by_name(conn, module, zone_name, want_private, zone_id, want_vpc_id):
+    """Finds a zone by name or zone_id"""
     for zone in conn.get_zones():
         # only save this zone id if the private status of the zone matches
         # the private_zone_in boolean specified in the params
         private_zone = module.boolean(zone.config.get('PrivateZone', False))
-        if private_zone == want_private and zone.name == zone_name:
-            return zone
+        if private_zone == want_private and ((zone.name == zone_name and zone_id == None) or zone.id.replace('/hostedzone/', '') == zone_id):
+            if want_vpc_id:
+                # NOTE: These details aren't available in other boto methods, hence the necessary
+                # extra API call
+                zone_details = conn.get_hosted_zone(zone.id)['GetHostedZoneResponse']
+                # this is to deal with this boto bug: https://github.com/boto/boto/pull/2882
+                if isinstance(zone_details['VPCs'], dict):
+                    if zone_details['VPCs']['VPC']['VPCId'] == want_vpc_id:
+                        return zone
+                else: # Forward compatibility for when boto fixes that bug
+                    if want_vpc_id in [v['VPCId'] for v in zone_details['VPCs']]:
+                        return zone
+            else:
+                return zone
     return None
 
 
@@ -252,6 +301,7 @@ def main():
     argument_spec.update(dict(
             command              = dict(choices=['get', 'create', 'delete'], required=True),
             zone                 = dict(required=True),
+            hosted_zone_id       = dict(required=False, default=None),
             record               = dict(required=True),
             ttl                  = dict(required=False, type='int', default=3600),
             type                 = dict(choices=['A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS'], required=True),
@@ -266,6 +316,7 @@ def main():
             region               = dict(required=False),
             health_check         = dict(required=False),
             failover             = dict(required=False),
+            vpc_id               = dict(required=False),
         )
     )
     module = AnsibleModule(argument_spec=argument_spec)
@@ -275,6 +326,7 @@ def main():
 
     command_in              = module.params.get('command')
     zone_in                 = module.params.get('zone').lower()
+    hosted_zone_id_in       = module.params.get('hosted_zone_id')
     ttl_in                  = module.params.get('ttl')
     record_in               = module.params.get('record').lower()
     type_in                 = module.params.get('type')
@@ -288,6 +340,7 @@ def main():
     region_in               = module.params.get('region')
     health_check_in         = module.params.get('health_check')
     failover_in             = module.params.get('failover')
+    vpc_id_in               = module.params.get('vpc_id')
 
     region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
 
@@ -314,6 +367,11 @@ def main():
           elif not alias_hosted_zone_id_in:
               module.fail_json(msg = "parameter 'alias_hosted_zone_id' required for alias create/delete")
 
+    if vpc_id_in and not private_zone_in:
+        module.fail_json(msg="parameter 'private_zone' must be true when specifying parameter"
+            " 'vpc_id'")
+
+
     # connect to the route53 endpoint 
     try:
         conn = Route53Connection(**aws_connect_kwargs)
@@ -321,7 +379,7 @@ def main():
         module.fail_json(msg = e.error_message)
 
     # Find the named zone ID
-    zone = get_zone_by_name(conn, module, zone_in, private_zone_in)
+    zone = get_zone_by_name(conn, module, zone_in, private_zone_in, hosted_zone_id_in, vpc_id_in)
 
     # Verify that the requested zone is already defined in Route53
     if zone is None:
@@ -355,11 +413,15 @@ def main():
             record['ttl'] = rset.ttl
             record['value'] = ','.join(sorted(rset.resource_records))
             record['values'] = sorted(rset.resource_records)
+            if hosted_zone_id_in:
+                record['hosted_zone_id'] = hosted_zone_id_in
             record['identifier'] = rset.identifier
             record['weight'] = rset.weight
             record['region'] = rset.region
             record['failover'] = rset.failover
             record['health_check'] = rset.health_check
+            if hosted_zone_id_in:
+                record['hosted_zone_id'] = hosted_zone_id_in
             if rset.alias_dns_name:
               record['alias'] = True
               record['value'] = rset.alias_dns_name
@@ -374,7 +436,13 @@ def main():
             break
 
     if command_in == 'get':
-        module.exit_json(changed=False, set=record)
+        if type_in == 'NS':
+            ns = record['values']
+        else:
+            # Retrieve name servers associated to the zone.
+            ns = conn.get_zone(zone_in).get_nameservers()
+
+        module.exit_json(changed=False, set=record, nameservers=ns)
 
     if command_in == 'delete' and not found_record:
         module.exit_json(changed=False)

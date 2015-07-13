@@ -692,6 +692,8 @@ def create_block_device(module, ec2, volume):
             size = volume.get('volume_size', snapshot.volume_size)
             if int(volume['iops']) > MAX_IOPS_TO_SIZE_RATIO * size:
                 module.fail_json(msg = 'IOPS must be at most %d times greater than size' % MAX_IOPS_TO_SIZE_RATIO)
+        if 'encrypted' in volume:
+            module.fail_json(msg = 'You can not set encyrption when creating a volume from a snapshot')
     if 'ephemeral' in volume:
         if 'snapshot' in volume: 
             module.fail_json(msg = 'Cannot set both ephemeral and snapshot')
@@ -701,8 +703,7 @@ def create_block_device(module, ec2, volume):
                            volume_type=volume.get('device_type'),
                            delete_on_termination=volume.get('delete_on_termination', False),
                            iops=volume.get('iops'),
-                           encrypted=volume.get('encrypted', False))
-
+                           encrypted=volume.get('encrypted', None))
 def boto_supports_param_in_spot_request(ec2, param):
     """
     Check if Boto library has a <param> in its request_spot_instances() method. For example, the placement_group parameter wasn't added until 2.3.0.

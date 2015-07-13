@@ -191,7 +191,8 @@ options:
     default: null
   detach:
     description:
-      - Enable detached mode to leave the container running in background.
+      - Enable detached mode to leave the container running in background. If
+        disabled, fail unless the process exits cleanly.
     default: true
   state:
     description:
@@ -539,24 +540,26 @@ class DockerManager(object):
         self.volumes = None
         if self.module.params.get('volumes'):
             self.binds = {}
-            self.volumes = {}
+            self.volumes = []
             vols = self.module.params.get('volumes')
             for vol in vols:
                 parts = vol.split(":")
+                # regular volume
+                if len(parts) == 1:
+                    self.volumes.append(parts[0])
                 # host mount (e.g. /mnt:/tmp, bind mounts host's /tmp to /mnt in the container)
-                if len(parts) == 2:
-                    self.volumes[parts[1]] = {}
-                    self.binds[parts[0]] = parts[1]
-                # with bind mode
-                elif len(parts) == 3:
-                    if parts[2] not in ['ro', 'rw']:
-                        self.module.fail_json(msg='bind mode needs to either be "ro" or "rw"')
-                    ro = parts[2] == 'ro'
-                    self.volumes[parts[1]] = {}
-                    self.binds[parts[0]] = {'bind': parts[1], 'ro': ro}
-                # docker mount (e.g. /www, mounts a docker volume /www on the container at the same location)
+                elif 2 <= len(parts) <= 3:
+                    # default to read-write
+                    ro = False
+                    # with supplied bind mode 
+                    if len(parts) == 3:
+                        if parts[2] not in ['ro', 'rw']:
+                            self.module.fail_json(msg='bind mode needs to either be "ro" or "rw"')
+                        else:
+                            ro = parts[2] == 'ro'
+                    self.binds[parts[0]] = {'bind': parts[1], 'ro': ro }
                 else:
-                    self.volumes[parts[0]] = {}
+                    self.module.fail_json(msg='volumes support 1 to 3 arguments')
 
         self.lxc_conf = None
         if self.module.params.get('lxc_conf'):
@@ -1063,15 +1066,14 @@ class DockerManager(object):
                 for container_port, config in self.port_bindings.iteritems():
                     if isinstance(container_port, int):
                         container_port = "{0}/tcp".format(container_port)
-                    bind = {}
                     if len(config) == 1:
-                        bind['HostIp'] = "0.0.0.0"
-                        bind['HostPort'] = ""
+                        expected_bound_ports[container_port] = [{'HostIp': "0.0.0.0", 'HostPort': ""}]
+                    elif isinstance(config[0], tuple):
+                        expected_bound_ports[container_port] = []
+                        for hostip, hostport in config:
+                            expected_bound_ports[container_port].append({ 'HostIp': hostip, 'HostPort': str(hostport)})
                     else:
-                        bind['HostIp'] = config[0]
-                        bind['HostPort'] = str(config[1])
-
-                    expected_bound_ports[container_port] = [bind]
+                        expected_bound_ports[container_port] = [{'HostIp': config[0], 'HostPort': str(config[1])}]
 
             actual_bound_ports = container['HostConfig']['PortBindings'] or {}
 
@@ -1108,8 +1110,8 @@ class DockerManager(object):
 
             # NETWORK MODE
 
-            expected_netmode = self.module.params.get('net') or ''
-            actual_netmode = container['HostConfig']['NetworkMode']
+            expected_netmode = self.module.params.get('net') or 'bridge'
+            actual_netmode = container['HostConfig']['NetworkMode'] or 'bridge'
             if actual_netmode != expected_netmode:
                 self.reload_reasons.append('net ({0} => {1})'.format(actual_netmode, expected_netmode))
                 differing.append(container)
@@ -1326,6 +1328,13 @@ class DockerManager(object):
         for i in containers:
             self.client.start(i)
             self.increment_counter('started')
+
+            if not self.module.params.get('detach'):
+                status = self.client.wait(i['Id'])
+                if status != 0:
+                    output = self.client.logs(i['Id'], stdout=True, stderr=True,
+                                              stream=False, timestamps=False)
+                    self.module.fail_json(status=status, msg=output)
 
     def stop_containers(self, containers):
         for i in containers:
@@ -1575,7 +1584,7 @@ def main():
                          summary=manager.counters,
                          containers=containers.changed,
                          reload_reasons=manager.get_reload_reason_message(),
-                         ansible_facts=_ansible_facts(containers.changed))
+                         ansible_facts=_ansible_facts(manager.get_inspect_containers(containers.changed)))
 
     except DockerAPIError as e:
         module.fail_json(changed=manager.has_changed(), msg="Docker API Error: %s" % e.explanation)

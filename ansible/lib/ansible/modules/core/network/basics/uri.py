@@ -75,7 +75,7 @@ options:
     description:
       - The HTTP method of the request or response.
     required: false
-    choices: [ "GET", "POST", "PUT", "HEAD", "DELETE", "OPTIONS", "PATCH" ]
+    choices: [ "GET", "POST", "PUT", "HEAD", "DELETE", "OPTIONS", "PATCH", "TRACE", "CONNECT", "REFRESH" ]
     default: "GET"
   return_content:
     description:
@@ -269,7 +269,7 @@ def url_filename(url):
 
 def uri(module, url, dest, user, password, body, body_format, method, headers, redirects, socket_timeout, validate_certs):
     # To debug
-    #httplib2.debug = 4
+    #httplib2.debuglevel = 4
 
     # Handle Redirects
     if redirects == "all" or redirects == "yes":
@@ -367,7 +367,7 @@ def main():
             password = dict(required=False, default=None),
             body = dict(required=False, default=None),
             body_format = dict(required=False, default='raw', choices=['raw', 'json']),
-            method = dict(required=False, default='GET', choices=['GET', 'POST', 'PUT', 'HEAD', 'DELETE', 'OPTIONS', 'PATCH']),
+            method = dict(required=False, default='GET', choices=['GET', 'POST', 'PUT', 'HEAD', 'DELETE', 'OPTIONS', 'PATCH', 'TRACE', 'CONNECT', 'REFRESH']),
             return_content = dict(required=False, default='no', type='bool'),
             force_basic_auth = dict(required=False, default='no', type='bool'),
             follow_redirects = dict(required=False, default='safe', choices=['all', 'safe', 'none', 'yes', 'no']),
