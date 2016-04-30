@@ -13,7 +13,7 @@
 ```sh
 $ ./install.sh
 [INFO] Prepare environment for installation
-[INFO] Prepare Ansible distribution, version 1.9.6-1
+[INFO] Prepare Ansible distribution, version 2.0.2.0
 [INFO] Prepare Ansible Core modules, latest version
 [INFO] Prepare Ansible Extra modules, latest version
 [INFO] Prepare Jinja2, version 2.8
