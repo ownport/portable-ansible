@@ -26,7 +26,7 @@ DOCUMENTATION = '''
 module: authorized_key
 short_description: Adds or removes an SSH authorized key
 description:
-     - Adds or removes an SSH authorized key for a user from a remote host.
+    - "Adds or removes SSH authorized keys for particular user accounts"
 version_added: "0.5"
 options:
   user:
@@ -80,9 +80,16 @@ options:
     choices: [ "yes", "no" ]
     default: "no"
     version_added: "1.9"
-description:
-    - "Adds or removes authorized keys for particular user accounts"
-author: "Brad Olson (@bradobro)"
+  validate_certs:
+    description:
+      - This only applies if using a https url as the source of the keys. If set to C(no), the SSL certificates will not be validated. 
+      - This should only set to C(no) used on personally controlled sites using self-signed certificates as it avoids verifying the source site. 
+      - Prior to 2.1 the code worked as if this was set to C(yes).
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    version_added: "2.1" 
+author: "Ansible Core Team"
 '''
 
 EXAMPLES = '''
@@ -93,27 +100,32 @@ EXAMPLES = '''
 - authorized_key: user=charlie key=https://github.com/charlie.keys
 
 # Using alternate directory locations:
-- authorized_key: user=charlie
-                  key="{{ lookup('file', '/home/charlie/.ssh/id_rsa.pub') }}"
-                  path='/etc/ssh/authorized_keys/charlie'
-                  manage_dir=no
+- authorized_key:
+    user: charlie
+    key: "{{ lookup('file', '/home/charlie/.ssh/id_rsa.pub') }}"
+    path: '/etc/ssh/authorized_keys/charlie'
+    manage_dir: no
 
 # Using with_file
 - name: Set up authorized_keys for the deploy user
-  authorized_key: user=deploy
-                  key="{{ item }}"
+  authorized_key: user=deploy key="{{ item }}"
   with_file:
     - public_keys/doe-jane
     - public_keys/doe-john
 
 # Using key_options:
-- authorized_key: user=charlie
-                  key="{{ lookup('file', '/home/charlie/.ssh/id_rsa.pub') }}"
-                  key_options='no-port-forwarding,host="10.0.1.1"'
+- authorized_key:
+    user: charlie
+    key:  "{{ lookup('file', '/home/charlie/.ssh/id_rsa.pub') }}"
+    key_options: 'no-port-forwarding,from="10.0.1.1"'
+
+# Using validate_certs:
+- authorized_key: user=charlie key=https://github.com/user.keys validate_certs=no
 
 # Set up authorized_keys exclusively with one key
-- authorized_key: user=root key=public_keys/doe-jane state=present
-                   exclusive=yes
+- authorized_key: user=root key="{{ item }}" state=present exclusive=yes
+  with_file:
+    - public_keys/doe-jane
 '''
 
 # Makes sure the public key line is present or absent in the user's .ssh/authorized_keys.
@@ -169,16 +181,15 @@ def keyfile(module, user, write=False, path=None, manage_dir=True):
     :return: full path string to authorized_keys for user
     """
 
-    if module.check_mode:
-        if path is None:
-            module.fail_json(msg="You must provide full path to key file in check mode")
-        else:
-            keysfile = path
-            return keysfile
+    if module.check_mode and path is not None:
+        keysfile = path
+        return keysfile
 
     try:
         user_entry = pwd.getpwnam(user)
     except KeyError, e:
+        if module.check_mode and path is None:
+            module.fail_json(msg="Either user must exist or you must provide full path to key file in check mode")
         module.fail_json(msg="Failed to lookup user %s: %s" % (user, str(e)))
     if path is None:
         homedir    = user_entry.pw_dir
@@ -357,6 +368,7 @@ def enforce_state(module, params):
     state       = params.get("state", "present")
     key_options = params.get("key_options", None)
     exclusive   = params.get("exclusive", False)
+    validate_certs = params.get("validate_certs", True)
     error_msg   = "Error getting key from: %s"
 
     # if the key is a url, request it and use it as key source
@@ -459,6 +471,7 @@ def main():
            key_options = dict(required=False, type='str'),
            unique      = dict(default=False, type='bool'),
            exclusive   = dict(default=False, type='bool'),
+           validate_certs = dict(default=True, type='bool'),
         ),
         supports_check_mode=True
     )

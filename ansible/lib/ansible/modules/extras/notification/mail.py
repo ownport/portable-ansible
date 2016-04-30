@@ -178,7 +178,7 @@ def main():
     module = AnsibleModule(
         argument_spec = dict(
             username = dict(default=None),
-            password = dict(default=None),
+            password = dict(default=None, no_log=True),
             host = dict(default='localhost'),
             port = dict(default='25'),
             sender = dict(default='root', aliases=['from']),
@@ -285,7 +285,6 @@ def main():
                 msg.attach(part)
             except Exception, e:
                 module.fail_json(rc=1, msg="Failed to send mail: can't attach file %s: %s" % (file, e))
-                sys.exit()
 
     composed = msg.as_string()
 

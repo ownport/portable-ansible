@@ -57,7 +57,6 @@ EXAMPLES = '''
 '''
 
 import grp
-import syslog
 import platform
 
 class Group(object):
@@ -86,13 +85,8 @@ class Group(object):
         self.name       = module.params['name']
         self.gid        = module.params['gid']
         self.system     = module.params['system']
-        self.syslogging = False
 
     def execute_command(self, cmd):
-        if self.syslogging:
-            syslog.openlog('ansible-%s' % os.path.basename(__file__))
-            syslog.syslog(syslog.LOG_NOTICE, 'Command %s' % '|'.join(cmd))
-
         return self.module.run_command(cmd)
 
     def group_del(self):
@@ -273,7 +267,8 @@ class DarwinGroup(Group):
     def group_add(self, **kwargs):
         cmd = [self.module.get_bin_path('dseditgroup', True)]
         cmd += [ '-o', 'create' ]
-        cmd += [ '-i', self.gid ]
+        if self.gid is not None:
+            cmd += [ '-i', self.gid ]
         cmd += [ '-L', self.name ]
         (rc, out, err) = self.execute_command(cmd)
         return (rc, out, err)
@@ -285,12 +280,13 @@ class DarwinGroup(Group):
         (rc, out, err) = self.execute_command(cmd)
         return (rc, out, err)
 
-    def group_mod(self):
+    def group_mod(self, gid=None):
         info = self.group_info()
         if self.gid is not None and int(self.gid) != info[2]:
             cmd = [self.module.get_bin_path('dseditgroup', True)]
             cmd += [ '-o', 'edit' ]
-            cmd += [ '-i', self.gid ]
+            if gid is not None:
+                cmd += [ '-i', gid ]
             cmd += [ '-L', self.name ]
             (rc, out, err) = self.execute_command(cmd)
             return (rc, out, err)
@@ -393,11 +389,9 @@ def main():
 
     group = Group(module)
 
-    if group.syslogging:
-        syslog.openlog('ansible-%s' % os.path.basename(__file__))
-        syslog.syslog(syslog.LOG_NOTICE, 'Group instantiated - platform %s' % group.platform)
-        if user.distribution:
-            syslog.syslog(syslog.LOG_NOTICE, 'Group instantiated - distribution %s' % group.distribution)
+    module.debug('Group instantiated - platform %s' % group.platform)
+    if group.distribution:
+        module.debug('Group instantiated - distribution %s' % group.distribution)
 
     rc = None
     out = ''

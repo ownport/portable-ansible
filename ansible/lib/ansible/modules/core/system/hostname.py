@@ -21,14 +21,17 @@
 DOCUMENTATION = '''
 ---
 module: hostname
-author: "Hiroaki Nakamura (@hnakamur)"
+author:
+    - "Hiroaki Nakamura (@hnakamur)"
+    - "Hideki Saito (@saito-hideki)"
 version_added: "1.4"
 short_description: Manage hostname
 requirements: [ hostname ]
 description:
-    - Set system's hostname
+    - Set system's hostname.
     - Currently implemented on Debian, Ubuntu, Fedora, RedHat, openSUSE, Linaro, ScientificLinux, Arch, CentOS, AMI.
-    - Any distribution that uses systemd as their init system
+    - Any distribution that uses systemd as their init system.
+    - Note, this module does *NOT* modify /etc/hosts. You need to modify it yourself using other modules like template or replace.
 options:
     name:
         required: true
@@ -40,6 +43,7 @@ EXAMPLES = '''
 - hostname: name=web01
 '''
 
+import socket
 from distutils.version import LooseVersion
 
 # import module snippets
@@ -116,13 +120,13 @@ class GenericStrategy(object):
       - set_current_hostname(name)
       - set_permanent_hostname(name)
     """
+
     def __init__(self, module):
         self.module = module
-
-    HOSTNAME_CMD = '/bin/hostname'
+        self.hostname_cmd = self.module.get_bin_path('hostname', True)
 
     def get_current_hostname(self):
-        cmd = [self.HOSTNAME_CMD]
+        cmd = [self.hostname_cmd]
         rc, out, err = self.module.run_command(cmd)
         if rc != 0:
             self.module.fail_json(msg="Command failed rc=%d, out=%s, err=%s" %
@@ -130,7 +134,7 @@ class GenericStrategy(object):
         return out.strip()
 
     def set_current_hostname(self, name):
-        cmd = [self.HOSTNAME_CMD, name]
+        cmd = [self.hostname_cmd, name]
         rc, out, err = self.module.run_command(cmd)
         if rc != 0:
             self.module.fail_json(msg="Command failed rc=%d, out=%s, err=%s" %
@@ -181,6 +185,42 @@ class DebianStrategy(GenericStrategy):
             self.module.fail_json(msg="failed to update hostname: %s" %
                 str(err))
 
+# ===========================================
+
+class SLESStrategy(GenericStrategy):
+    """
+    This is a SLES Hostname strategy class - it edits the
+    /etc/HOSTNAME file.
+    """
+    HOSTNAME_FILE = '/etc/HOSTNAME'
+
+    def get_permanent_hostname(self):
+        if not os.path.isfile(self.HOSTNAME_FILE):
+            try:
+                open(self.HOSTNAME_FILE, "a").write("")
+            except IOError, err:
+                self.module.fail_json(msg="failed to write file: %s" %
+                    str(err))
+        try:
+            f = open(self.HOSTNAME_FILE)
+            try:
+                return f.read().strip()
+            finally:
+                f.close()
+        except Exception, err:
+            self.module.fail_json(msg="failed to read hostname: %s" %
+                str(err))
+
+    def set_permanent_hostname(self, name):
+        try:
+            f = open(self.HOSTNAME_FILE, 'w+')
+            try:
+                f.write("%s\n" % name)
+            finally:
+                f.close()
+        except Exception, err:
+            self.module.fail_json(msg="failed to update hostname: %s" %
+                str(err))
 
 # ===========================================
 
@@ -257,8 +297,8 @@ class SystemdStrategy(GenericStrategy):
                 (rc, out, err))
 
     def get_permanent_hostname(self):
-        cmd = 'hostnamectl --static status'
-        rc, out, err = self.module.run_command(cmd, use_unsafe_shell=True)
+        cmd = ['hostnamectl', '--static', 'status']
+        rc, out, err = self.module.run_command(cmd)
         if rc != 0:
             self.module.fail_json(msg="Command failed rc=%d, out=%s, err=%s" %
                 (rc, out, err))
@@ -363,6 +403,90 @@ class OpenBSDStrategy(GenericStrategy):
 
 # ===========================================
 
+class SolarisStrategy(GenericStrategy):
+    """
+    This is a Solaris11 or later Hostname manipulation strategy class - it
+    execute hostname command.
+    """
+
+    def set_current_hostname(self, name):
+        cmd_option = '-t'
+        cmd = [self.hostname_cmd, cmd_option, name]
+        rc, out, err = self.module.run_command(cmd)
+        if rc != 0:
+            self.module.fail_json(msg="Command failed rc=%d, out=%s, err=%s" %
+                (rc, out, err))
+
+    def get_permanent_hostname(self):
+        fmri = 'svc:/system/identity:node'
+        pattern = 'config/nodename'
+        cmd = '/usr/sbin/svccfg -s %s listprop -o value %s' % (fmri, pattern)
+        rc, out, err = self.module.run_command(cmd, use_unsafe_shell=True)
+        if rc != 0:
+            self.module.fail_json(msg="Command failed rc=%d, out=%s, err=%s" %
+                (rc, out, err))
+        return out.strip()
+
+    def set_permanent_hostname(self, name):
+        cmd = [self.hostname_cmd, name]
+        rc, out, err = self.module.run_command(cmd)
+        if rc != 0:
+            self.module.fail_json(msg="Command failed rc=%d, out=%s, err=%s" %
+                (rc, out, err))
+
+# ===========================================
+
+class FreeBSDStrategy(GenericStrategy):
+    """
+    This is a FreeBSD hostname manipulation strategy class - it edits
+    the /etc/rc.conf.d/hostname file.
+    """
+
+    HOSTNAME_FILE = '/etc/rc.conf.d/hostname'
+
+    def get_permanent_hostname(self):
+
+        if not os.path.isfile(self.HOSTNAME_FILE):
+            try:
+                open(self.HOSTNAME_FILE, "a").write("hostname=temporarystub\n")
+            except IOError, err:
+                self.module.fail_json(msg="failed to write file: %s" %
+                    str(err))
+        try:
+            try:
+                f = open(self.HOSTNAME_FILE, 'r')
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('hostname='):
+                        return line[10:].strip('"')
+            except Exception, err:
+                self.module.fail_json(msg="failed to read hostname: %s" % str(err))
+        finally:
+            f.close()
+
+        return None
+
+    def set_permanent_hostname(self, name):
+        try:
+            try:
+                f = open(self.HOSTNAME_FILE, 'r')
+                lines = [x.strip() for x in f]
+
+                for i, line in enumerate(lines):
+                    if line.startswith('hostname='):
+                        lines[i] = 'hostname="%s"' % name
+                        break
+                f.close()
+
+                f = open(self.HOSTNAME_FILE, 'w')
+                f.write('\n'.join(lines) + '\n')
+            except Exception, err:
+                self.module.fail_json(msg="failed to update hostname: %s" % str(err))
+        finally:
+            f.close()
+
+# ===========================================
+
 class FedoraHostname(Hostname):
     platform = 'Linux'
     distribution = 'Fedora'
@@ -374,6 +498,8 @@ class SLESHostname(Hostname):
     distribution_version = get_distribution_version()
     if distribution_version and LooseVersion(distribution_version) >= LooseVersion("12"):
         strategy_class = SystemdStrategy
+    elif distribution_version and LooseVersion("10") <= LooseVersion(distribution_version) <= LooseVersion("12"):
+        strategy_class = SLESStrategy
     else:
         strategy_class = UnimplementedStrategy
 
@@ -446,6 +572,15 @@ class ScientificLinuxHostname(Hostname):
     else:
         strategy_class = RedHatStrategy
 
+class OracleLinuxHostname(Hostname):
+    platform = 'Linux'
+    distribution = 'Oracle linux server'
+    distribution_version = get_distribution_version()
+    if distribution_version and LooseVersion(distribution_version) >= LooseVersion("7"):
+        strategy_class = SystemdStrategy
+    else:
+        strategy_class = RedHatStrategy
+
 class AmazonLinuxHostname(Hostname):
     platform = 'Linux'
     distribution = 'Amazon'
@@ -454,6 +589,11 @@ class AmazonLinuxHostname(Hostname):
 class DebianHostname(Hostname):
     platform = 'Linux'
     distribution = 'Debian'
+    strategy_class = DebianStrategy
+
+class KaliHostname(Hostname):
+    platform = 'Linux'
+    distribution = 'Kali'
     strategy_class = DebianStrategy
 
 class UbuntuHostname(Hostname):
@@ -486,6 +626,17 @@ class OpenBSDHostname(Hostname):
     distribution = None
     strategy_class = OpenBSDStrategy
 
+class SolarisHostname(Hostname):
+    platform = 'SunOS'
+    distribution = None
+    strategy_class = SolarisStrategy
+
+class FreeBSDHostname(Hostname):
+    platform = 'FreeBSD'
+    distribution = None
+    strategy_class = FreeBSDStrategy
+
+
 # ===========================================
 
 def main():
@@ -509,6 +660,10 @@ def main():
         hostname.set_permanent_hostname(name)
         changed = True
 
-    module.exit_json(changed=changed, name=name, ansible_facts=dict(ansible_hostname=name))
+    module.exit_json(changed=changed, name=name,
+                     ansible_facts=dict(ansible_hostname=name.split('.')[0],
+                                        ansible_nodename=name,
+                                        ansible_fqdn=socket.getfqdn(),
+                                        ansible_domain='.'.join(socket.getfqdn().split('.')[1:])))
 
 main()

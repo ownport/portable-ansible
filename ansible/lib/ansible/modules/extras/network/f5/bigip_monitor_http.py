@@ -54,7 +54,8 @@ options:
     validate_certs:
         description:
             - If C(no), SSL certificates will not be validated. This should only be used
-              on personally controlled sites using self-signed certificates.
+              on personally controlled sites.  Prior to 2.0, this module would always
+              validate on python >= 2.7.9 and never validate on python <= 2.7.8
         required: false
         default: 'yes'
         choices: ['yes', 'no']
@@ -249,7 +250,7 @@ def check_integer_property(api, monitor, int_property):
 
 def set_integer_property(api, monitor, int_property):
 
-    api.LocalLB.Monitor.set_template_int_property(template_names=[monitor], values=[int_property])
+    api.LocalLB.Monitor.set_template_integer_property(template_names=[monitor], values=[int_property])
 
 
 def update_monitor_properties(api, module, monitor, template_string_properties, template_integer_properties):
@@ -333,7 +334,7 @@ def main():
 
     # end monitor specific stuff
 
-    api = bigip_api(server, user, password)
+    api = bigip_api(server, user, password, validate_certs)
     monitor_exists = check_monitor_exists(module, api, monitor, parent)
 
 

@@ -47,7 +47,7 @@ options:
     required: false
     default: null
     aliases: []
-    choices: [ 'mysql5.1', 'mysql5.5', 'mysql5.6', 'oracle-ee-11.2', 'oracle-se-11.2', 'oracle-se1-11.2', 'postgres9.3', 'postgres9.4', 'sqlserver-ee-10.5', 'sqlserver-ee-11.0', 'sqlserver-ex-10.5', 'sqlserver-ex-11.0', 'sqlserver-se-10.5', 'sqlserver-se-11.0', 'sqlserver-web-10.5', 'sqlserver-web-11.0']
+    choices: [ 'aurora5.6', 'mariadb10.0', 'mysql5.1', 'mysql5.5', 'mysql5.6', 'oracle-ee-11.2', 'oracle-ee-12.1', 'oracle-se-11.2', 'oracle-se-12.1', 'oracle-se1-11.2', 'oracle-se1-12.1', 'postgres9.3', 'postgres9.4', 'sqlserver-ee-10.5', 'sqlserver-ee-11.0', 'sqlserver-ex-10.5', 'sqlserver-ex-11.0', 'sqlserver-ex-12.0', 'sqlserver-se-10.5', 'sqlserver-se-11.0', 'sqlserver-se-12.0', 'sqlserver-web-10.5', 'sqlserver-web-11.0', 'sqlserver-web-12.0' ]
   immediate:
     description:
       - Whether to apply the changes immediately, or after the next reboot of any associated instances.
@@ -60,15 +60,10 @@ options:
     required: false
     default: null
     aliases: []
-    choices: [ 'mysql5.1', 'mysql5.5', 'mysql5.6', 'oracle-ee-11.2', 'oracle-se-11.2', 'oracle-se1-11.2', 'postgres9.3', 'postgres9.4', 'sqlserver-ee-10.5', 'sqlserver-ee-11.0', 'sqlserver-ex-10.5', 'sqlserver-ex-11.0', 'sqlserver-se-10.5', 'sqlserver-se-11.0', 'sqlserver-web-10.5', 'sqlserver-web-11.0']
-  region:
-    description:
-      - The AWS region to use. If not specified then the value of the AWS_REGION or EC2_REGION environment variable, if any, is used.
-    required: true
-    default: null
-    aliases: ['aws_region', 'ec2_region']
 author: "Scott Anderson (@tastychutney)"
-extends_documentation_fragment: aws
+extends_documentation_fragment:
+    - aws
+    - ec2
 '''
 
 EXAMPLES = '''
@@ -88,22 +83,30 @@ EXAMPLES = '''
 '''
 
 VALID_ENGINES = [
+    'aurora5.6',
+    'mariadb10.0',
     'mysql5.1',
     'mysql5.5',
     'mysql5.6',
     'oracle-ee-11.2',
+    'oracle-ee-12.1',
     'oracle-se-11.2',
+    'oracle-se-12.1',
     'oracle-se1-11.2',
+    'oracle-se1-12.1',
     'postgres9.3',
     'postgres9.4',
     'sqlserver-ee-10.5',
     'sqlserver-ee-11.0',
     'sqlserver-ex-10.5',
     'sqlserver-ex-11.0',
+    'sqlserver-ex-12.0',
     'sqlserver-se-10.5',
     'sqlserver-se-11.0',
+    'sqlserver-se-12.0',
     'sqlserver-web-10.5',
     'sqlserver-web-11.0',
+    'sqlserver-web-12.0',
 ]
 
 try:
@@ -116,7 +119,7 @@ except ImportError:
 
 # returns a tuple: (whether or not a parameter was changed, the remaining parameters that weren't found in this parameter group)
 
-class NotModifiableError(StandardError):
+class NotModifiableError(Exception):
     def __init__(self, error_message, *args):
         super(NotModifiableError, self).__init__(error_message, *args)
         self.error_message = error_message
@@ -179,7 +182,7 @@ def modify_group(group, params, immediate=False):
     new_params = dict(params)
 
     for key in new_params.keys():
-        if group.has_key(key):
+        if key in group:
             param = group[key]
             new_value = new_params[key]
 
@@ -244,7 +247,7 @@ def main():
         module.fail_json(msg = str("Either region or AWS_REGION or EC2_REGION environment variable or boto config aws_region or ec2_region must be set."))
 
     try:
-        conn = boto.rds.connect_to_region(region, **aws_connect_kwargs)
+        conn = connect_to_aws(boto.rds, region, **aws_connect_kwargs)
     except boto.exception.BotoServerError, e:
         module.fail_json(msg = e.error_message)
 
@@ -285,7 +288,6 @@ def main():
                 else:
                     break
 
-
     except BotoServerError, e:
         module.fail_json(msg = e.error_message)
 
@@ -301,4 +303,5 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.ec2 import *
 
-main()
+if __name__ == '__main__':
+    main()

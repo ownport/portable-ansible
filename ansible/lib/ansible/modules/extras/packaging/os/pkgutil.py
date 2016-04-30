@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2013, Alexander Winkler <mail () winkler-alexander.de>
-# 	based on svr4pkg by
-# 		Boyd Adamson <boyd () boydadamson.com> (2012)
+# based on svr4pkg by
+#  Boyd Adamson <boyd () boydadamson.com> (2012)
 #
 # This file is part of Ansible
 #
@@ -42,6 +42,7 @@ options:
     description:
       - Specifies the repository path to install the package from.
       - Its global definition is done in C(/etc/opt/csw/pkgutil.conf).
+    required: false
   state:
     description:
       - Whether to install (C(present)), or remove (C(absent)) a package.
@@ -49,6 +50,13 @@ options:
       - "Note: The module has a limitation that (C(latest)) only works for one package, not lists of them."
     required: true
     choices: ["present", "absent", "latest"]
+  update_catalog:
+    description:
+      - If you want to refresh your catalog from the mirror, set this to (C(yes)).
+    required: false
+    choices: ["yes", "no"]
+    default: no
+    version_added: "2.1"
 '''
 
 EXAMPLES = '''
@@ -63,10 +71,10 @@ import os
 import pipes
 
 def package_installed(module, name):
-    cmd = [module.get_bin_path('pkginfo', True)]
+    cmd = ['pkginfo']
     cmd.append('-q')
     cmd.append(name)
-    rc, out, err = module.run_command(' '.join(cmd))
+    rc, out, err = run_command(module, cmd)
     if rc == 0:
         return True
     else:
@@ -74,24 +82,25 @@ def package_installed(module, name):
 
 def package_latest(module, name, site):
     # Only supports one package
-    cmd = [ 'pkgutil', '--single', '-c' ]
+    cmd = [ 'pkgutil', '-U', '--single', '-c' ]
     if site is not None:
-        cmd += [ '-t', pipes.quote(site) ]
-    cmd.append(pipes.quote(name))
-    cmd += [ '| tail -1 | grep -v SAME' ]
-    rc, out, err = module.run_command(' '.join(cmd), use_unsafe_shell=True)
-    if rc == 1:
-        return True
-    else:
-        return False
+        cmd += [ '-t', site]
+    cmd.append(name)
+    rc, out, err = run_command(module, cmd)
+    # replace | tail -1 |grep -v SAME
+    # use -2, because splitting on \n create a empty line
+    # at the end of the list
+    return 'SAME' in out.split('\n')[-2]
 
-def run_command(module, cmd):
+def run_command(module, cmd, **kwargs):
     progname = cmd[0]
-    cmd[0] = module.get_bin_path(progname, True)
-    return module.run_command(cmd)
+    cmd[0] = module.get_bin_path(progname, True, ['/opt/csw/bin'])
+    return module.run_command(cmd, **kwargs)
 
-def package_install(module, state, name, site):
+def package_install(module, state, name, site, update_catalog):
     cmd = [ 'pkgutil', '-iy' ]
+    if update_catalog:
+        cmd += [ '-U' ]
     if site is not None:
         cmd += [ '-t', site ]
     if state == 'latest':
@@ -100,8 +109,10 @@ def package_install(module, state, name, site):
     (rc, out, err) = run_command(module, cmd)
     return (rc, out, err)
 
-def package_upgrade(module, name, site):
+def package_upgrade(module, name, site, update_catalog):
     cmd = [ 'pkgutil', '-ufy' ]
+    if update_catalog:
+        cmd += [ '-U' ]
     if site is not None:
         cmd += [ '-t', site ]
     cmd.append(name)
@@ -119,12 +130,14 @@ def main():
             name = dict(required = True),
             state = dict(required = True, choices=['present', 'absent','latest']),
             site = dict(default = None),
+            update_catalog = dict(required = False, default = "no", type='bool', choices=["yes","no"]),
         ),
         supports_check_mode=True
     )
     name = module.params['name']
     state = module.params['state']
     site = module.params['site']
+    update_catalog = module.params['update_catalog']
     rc = None
     out = ''
     err = ''
@@ -136,31 +149,59 @@ def main():
         if not package_installed(module, name):
             if module.check_mode:
                 module.exit_json(changed=True)
-            (rc, out, err) = package_install(module, state, name, site)
+            (rc, out, err) = package_install(module, state, name, site, update_catalog)
             # Stdout is normally empty but for some packages can be
             # very long and is not often useful
             if len(out) > 75:
                 out = out[:75] + '...'
+            if rc != 0:
+                if err:
+                    msg = err
+                else:
+                    msg = out
+                module.fail_json(msg=msg)
 
     elif state == 'latest':
         if not package_installed(module, name):
             if module.check_mode:
                 module.exit_json(changed=True)
-            (rc, out, err) = package_install(module, state, name, site)
+            (rc, out, err) = package_install(module, state, name, site, update_catalog)
+            if len(out) > 75:
+                out = out[:75] + '...'
+            if rc != 0:
+                if err:
+                    msg = err
+                else:
+                    msg = out
+                module.fail_json(msg=msg)
+
         else:
             if not package_latest(module, name, site):
                 if module.check_mode:
                     module.exit_json(changed=True) 
-                (rc, out, err) = package_upgrade(module, name, site)
+                (rc, out, err) = package_upgrade(module, name, site, update_catalog)
                 if len(out) > 75:
                     out = out[:75] + '...'
+                if rc != 0:
+                    if err:
+                        msg = err
+                    else:
+                        msg = out
+                    module.fail_json(msg=msg)
 
     elif state == 'absent':
         if package_installed(module, name):
             if module.check_mode:
                 module.exit_json(changed=True)
             (rc, out, err) = package_uninstall(module, name)
-            out = out[:75]
+            if len(out) > 75:
+                out = out[:75] + '...'
+            if rc != 0:
+                if err:
+                    msg = err
+                else:
+                    msg = out
+                module.fail_json(msg=msg)
 
     if rc is None:
         # pkgutil was not executed because the package was already present/absent

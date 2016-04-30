@@ -33,51 +33,48 @@ options:
       - the name of the image to create or delete
     required: true
     default: null
-    aliases: []
   description:
     description:
       - an optional description
     required: false
     default: null
-    aliases: []
   source:
     description:
       - the source disk or the Google Cloud Storage URI to create the image from
     required: false
     default: null
-    aliases: []
   state:
     description:
       - desired state of the image
     required: false
     default: "present"
     choices: ["present", "absent"]
-    aliases: []
   zone:
     description:
       - the zone of the disk specified by source
     required: false
     default: "us-central1-a"
-    aliases: []
+  timeout:
+    description:
+      - timeout for the operation
+    required: false
+    default: 180
+    version_added: "2.0"
   service_account_email:
     description:
       - service account email
     required: false
     default: null
-    aliases: []
   pem_file:
     description:
       - path to the pem file associated with the service account email
     required: false
     default: null
-    aliases: []
   project_id:
     description:
       - your GCE project ID
     required: false
     default: null
-    aliases: []
-
 requirements:
     - "python >= 2.6"
     - "apache-libcloud"
@@ -130,6 +127,7 @@ def create_image(gce, name, module):
   source = module.params.get('source')
   zone = module.params.get('zone')
   desc = module.params.get('description')
+  timeout = module.params.get('timeout')
 
   if not source:
     module.fail_json(msg='Must supply a source', changed=False)
@@ -149,13 +147,17 @@ def create_image(gce, name, module):
     except GoogleBaseError, e:
       module.fail_json(msg=str(e), changed=False)
 
+  old_timeout = gce.connection.timeout
   try:
+    gce.connection.timeout = timeout
     gce.ex_create_image(name, volume, desc, False)
     return True
   except ResourceExistsError:
     return False
   except GoogleBaseError, e:
     module.fail_json(msg=str(e), changed=False)
+  finally:
+    gce.connection.timeout = old_timeout
 
 
 def delete_image(gce, name, module):
@@ -178,8 +180,9 @@ def main():
           state=dict(default='present', choices=['present', 'absent']),
           zone=dict(default='us-central1-a'),
           service_account_email=dict(),
-          pem_file=dict(),
+          pem_file=dict(type='path'),
           project_id=dict(),
+          timeout=dict(type='int', default=180)
       )
   )
 
@@ -201,7 +204,6 @@ def main():
     changed = delete_image(gce, name, module)
 
   module.exit_json(changed=changed, name=name)
-  sys.exit(0)
 
 # import module snippets
 from ansible.module_utils.basic import *

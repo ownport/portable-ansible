@@ -37,10 +37,23 @@ options:
     required: false
     default: no
     choices: [ "yes", "no" ]
+  production:
+    description:
+      - Install with --production flag
+    required: false
+    default: no
+    choices: [ "yes", "no" ]
+    version_added: "2.0"
   path:
     description:
       - The base path where to install the bower packages
     required: true
+  relative_execpath:
+    description:
+      - Relative path to bower executable from install path
+    default: null
+    required: false
+    version_added: "2.1"
   state:
     description:
       - The state of the bower package
@@ -68,6 +81,10 @@ description: Install packages based on bower.json.
 
 description: Update packages based on bower.json to their latest version.
 - bower: path=/app/location state=latest
+
+description: install bower locally and run from there
+- npm: path=/app/location name=bower global=no
+- bower: path=/app/location relative_execpath=node_modules/.bin
 '''
 
 
@@ -76,7 +93,9 @@ class Bower(object):
         self.module = module
         self.name = kwargs['name']
         self.offline = kwargs['offline']
+        self.production = kwargs['production']
         self.path = kwargs['path']
+        self.relative_execpath = kwargs['relative_execpath']
         self.version = kwargs['version']
 
         if kwargs['version']:
@@ -86,13 +105,26 @@ class Bower(object):
 
     def _exec(self, args, run_in_check_mode=False, check_rc=True):
         if not self.module.check_mode or (self.module.check_mode and run_in_check_mode):
-            cmd = ["bower"] + args + ['--config.interactive=false', '--allow-root']
+            cmd = []
+
+            if self.relative_execpath:
+                cmd.append(os.path.join(self.path, self.relative_execpath, "bower"))
+                if not os.path.isfile(cmd[-1]):
+                    self.module.fail_json(msg="bower not found at relative path %s" % self.relative_execpath)
+            else:
+                cmd.append("bower")
+
+            cmd.extend(args)
+            cmd.extend(['--config.interactive=false', '--allow-root'])
 
             if self.name:
                 cmd.append(self.name_version)
 
             if self.offline:
                 cmd.append('--offline')
+
+            if self.production:
+                cmd.append('--production')
 
             # If path is specified, cd into that path and run the command.
             cwd = None
@@ -116,11 +148,14 @@ class Bower(object):
         data = json.loads(self._exec(cmd, True, False))
         if 'dependencies' in data:
             for dep in data['dependencies']:
-                if 'missing' in data['dependencies'][dep] and data['dependencies'][dep]['missing']:
+                dep_data = data['dependencies'][dep]
+                if dep_data.get('missing', False):
                     missing.append(dep)
-                elif data['dependencies'][dep]['pkgMeta']['version'] != data['dependencies'][dep]['update']['latest']:
+                elif ('version' in dep_data['pkgMeta'] and
+                        'update' in dep_data and
+                        dep_data['pkgMeta']['version'] != dep_data['update']['latest']):
                     outdated.append(dep)
-                elif 'incompatible' in data['dependencies'][dep] and data['dependencies'][dep]['incompatible']:
+                elif dep_data.get('incompatible', False):
                     outdated.append(dep)
                 else:
                     installed.append(dep)
@@ -144,7 +179,9 @@ def main():
     arg_spec = dict(
         name=dict(default=None),
         offline=dict(default='no', type='bool'),
-        path=dict(required=True),
+        production=dict(default='no', type='bool'),
+        path=dict(required=True, type='path'),
+        relative_execpath=dict(default=None, required=False, type='path'),
         state=dict(default='present', choices=['present', 'absent', 'latest', ]),
         version=dict(default=None),
     )
@@ -154,14 +191,16 @@ def main():
 
     name = module.params['name']
     offline = module.params['offline']
+    production = module.params['production']
     path = os.path.expanduser(module.params['path'])
+    relative_execpath = module.params['relative_execpath']
     state = module.params['state']
     version = module.params['version']
 
     if state == 'absent' and not name:
         module.fail_json(msg='uninstalling a package is only available for named packages')
 
-    bower = Bower(module, name=name, offline=offline, path=path, version=version)
+    bower = Bower(module, name=name, offline=offline, production=production, path=path, relative_execpath=relative_execpath, version=version)
 
     changed = False
     if state == 'present':
@@ -184,4 +223,5 @@ def main():
 
 # Import module snippets
 from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()

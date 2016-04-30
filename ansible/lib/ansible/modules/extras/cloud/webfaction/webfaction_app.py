@@ -69,7 +69,9 @@ options:
         required: false
         default: null
 
-    open_port:
+    port_open:
+        description:
+            - IF the port should be opened
         required: false
         default: false
 
@@ -112,9 +114,9 @@ def main():
             name = dict(required=True),
             state = dict(required=False, choices=['present', 'absent'], default='present'),
             type = dict(required=True),
-            autostart = dict(required=False, choices=BOOLEANS, default=False),
+            autostart = dict(required=False, type='bool', default=False),
             extra_info = dict(required=False, default=""),
-            port_open = dict(required=False, choices=BOOLEANS, default=False),
+            port_open = dict(required=False, type='bool', default=False),
             login_name = dict(required=True),
             login_password = dict(required=True),
             machine = dict(required=False, default=False),

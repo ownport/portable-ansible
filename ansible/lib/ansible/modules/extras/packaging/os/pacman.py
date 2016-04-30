@@ -3,6 +3,7 @@
 
 # (c) 2012, Afterburn <http://github.com/afterburn>
 # (c) 2013, Aaron Bull Schaefer <aaron@elasticdog.com>
+# (c) 2015, Indrajit Raychaudhuri <irc+code@indrajit.com>
 #
 # This file is part of Ansible
 #
@@ -28,6 +29,7 @@ description:
       Arch Linux and its variants.
 version_added: "1.0"
 author:
+    - "Indrajit Raychaudhuri (@indrajitr)"
     - "'Aaron Bull Schaefer (@elasticdog)' <aaron@elasticdog.com>"
     - "Afterburn"
 notes: []
@@ -52,17 +54,35 @@ options:
               that they are not required by other packages and were not
               explicitly installed by a user.
         required: false
-        default: "no"
+        default: no
         choices: ["yes", "no"]
         version_added: "1.3"
+
+    force:
+        description:
+            - When removing package - force remove package, without any
+              checks. When update_cache - force redownload repo
+              databases.
+        required: false
+        default: no
+        choices: ["yes", "no"]
+        version_added: "2.0"
 
     update_cache:
         description:
             - Whether or not to refresh the master package lists. This can be
               run as part of a package installation or as a separate step.
         required: false
-        default: "no"
+        default: no
         choices: ["yes", "no"]
+
+    upgrade:
+        description:
+            - Whether or not to upgrade whole system
+        required: false
+        default: no
+        choices: ["yes", "no"]
+        version_added: "2.0"
 '''
 
 EXAMPLES = '''
@@ -80,15 +100,21 @@ EXAMPLES = '''
 
 # Run the equivalent of "pacman -Sy" as a separate step
 - pacman: update_cache=yes
+
+# Run the equivalent of "pacman -Su" as a separate step
+- pacman: upgrade=yes
+
+# Run the equivalent of "pacman -Syu" as a separate step
+- pacman: update_cache=yes upgrade=yes
+
+# Run the equivalent of "pacman -Rdd", force remove package baz
+- pacman: name=baz state=absent force=yes
 '''
 
-import json
 import shlex
 import os
 import re
 import sys
-
-PACMAN_PATH = "/usr/bin/pacman"
 
 def get_version(pacman_output):
     """Take pacman -Qi or pacman -Si output and get the Version"""
@@ -98,19 +124,19 @@ def get_version(pacman_output):
             return line.split(':')[1].strip()
     return None
 
-def query_package(module, name, state="present"):
-    """Query the package status in both the local system and the repository. Returns a boolean to indicate if the package is installed, and a second boolean to indicate if the package is up-to-date."""
+def query_package(module, pacman_path, name, state="present"):
+    """Query the package status in both the local system and the repository. Returns a boolean to indicate if the package is installed, a second boolean to indicate if the package is up-to-date and a third boolean to indicate whether online information were available"""
     if state == "present":
-        lcmd = "pacman -Qi %s" % (name)
+        lcmd = "%s -Qi %s" % (pacman_path, name)
         lrc, lstdout, lstderr = module.run_command(lcmd, check_rc=False)
         if lrc != 0:
             # package is not installed locally
-            return False, False
-        
+            return False, False, False
+
         # get the version installed locally (if any)
         lversion = get_version(lstdout)
-        
-        rcmd = "pacman -Si %s" % (name)
+
+        rcmd = "%s -Si %s" % (pacman_path, name)
         rrc, rstdout, rstderr = module.run_command(rcmd, check_rc=False)
         # get the version in the repository
         rversion = get_version(rstdout)
@@ -118,13 +144,19 @@ def query_package(module, name, state="present"):
         if rrc == 0:
             # Return True to indicate that the package is installed locally, and the result of the version number comparison
             # to determine if the package is up-to-date.
-            return True, (lversion == rversion)
+            return True, (lversion == rversion), False
 
-        return False, False
+    # package is installed but cannot fetch remote Version. Last True stands for the error
+        return True, True, True
 
 
-def update_package_db(module):
-    cmd = "pacman -Sy"
+def update_package_db(module, pacman_path):
+    if module.params["force"]:
+        args = "Syy"
+    else:
+        args = "Sy"
+
+    cmd = "%s -%s" % (pacman_path, args)
     rc, stdout, stderr = module.run_command(cmd, check_rc=False)
 
     if rc == 0:
@@ -132,10 +164,31 @@ def update_package_db(module):
     else:
         module.fail_json(msg="could not update package db")
 
+def upgrade(module, pacman_path):
+    cmdupgrade = "%s -Suq --noconfirm" % (pacman_path)
+    cmdneedrefresh = "%s -Qqu" % (pacman_path)
+    rc, stdout, stderr = module.run_command(cmdneedrefresh, check_rc=False)
 
-def remove_packages(module, packages):
-    if module.params["recurse"]:
-        args = "Rs"
+    if rc == 0:
+        if module.check_mode:
+            data = stdout.split('\n')
+            module.exit_json(changed=True, msg="%s package(s) would be upgraded" % (len(data) - 1))
+        rc, stdout, stderr = module.run_command(cmdupgrade, check_rc=False)
+        if rc == 0:
+            module.exit_json(changed=True, msg='System upgraded')
+        else:
+            module.fail_json(msg="Could not upgrade")
+    else:
+        module.exit_json(changed=False, msg='Nothing to upgrade')
+
+def remove_packages(module, pacman_path, packages):
+    if module.params["recurse"] or module.params["force"]:
+        if module.params["recurse"]:
+            args = "Rs"
+        if module.params["force"]:
+            args = "Rdd"
+        if module.params["recurse"] and module.params["force"]:
+            args = "Rdds"
     else:
         args = "R"
 
@@ -143,11 +196,11 @@ def remove_packages(module, packages):
     # Using a for loop incase of error, we can report the package that failed
     for package in packages:
         # Query the package first, to see if we even need to remove
-        installed, updated = query_package(module, package)
+        installed, updated, unknown = query_package(module, pacman_path, package)
         if not installed:
             continue
 
-        cmd = "pacman -%s %s --noconfirm" % (args, package)
+        cmd = "%s -%s %s --noconfirm" % (pacman_path, args, package)
         rc, stdout, stderr = module.run_command(cmd, check_rc=False)
 
         if rc != 0:
@@ -162,12 +215,17 @@ def remove_packages(module, packages):
     module.exit_json(changed=False, msg="package(s) already absent")
 
 
-def install_packages(module, state, packages, package_files):
+def install_packages(module, pacman_path, state, packages, package_files):
     install_c = 0
+    package_err = []
+    message = ""
 
     for i, package in enumerate(packages):
         # if the package is installed and state == present or state == latest and is up-to-date then skip
-        installed, updated = query_package(module, package)
+        installed, updated, latestError = query_package(module, pacman_path, package)
+        if latestError and state == 'latest':
+            package_err.append(package)
+
         if installed and (state == 'present' or (state == 'latest' and updated)):
             continue
 
@@ -176,7 +234,7 @@ def install_packages(module, state, packages, package_files):
         else:
             params = '-S %s' % package
 
-        cmd = "pacman %s --noconfirm" % (params)
+        cmd = "%s %s --noconfirm --needed" % (pacman_path, params)
         rc, stdout, stderr = module.run_command(cmd, check_rc=False)
 
         if rc != 0:
@@ -184,16 +242,18 @@ def install_packages(module, state, packages, package_files):
 
         install_c += 1
 
+    if state == 'latest' and len(package_err) > 0:
+        message = "But could not ensure 'latest' state for %s package(s) as remote version could not be fetched." % (package_err)
+
     if install_c > 0:
-        module.exit_json(changed=True, msg="installed %s package(s)" % (install_c))
+        module.exit_json(changed=True, msg="installed %s package(s). %s" % (install_c, message))
 
-    module.exit_json(changed=False, msg="package(s) already installed")
+    module.exit_json(changed=False, msg="package(s) already installed. %s" % (message))
 
-
-def check_packages(module, packages, state):
+def check_packages(module, pacman_path, packages, state):
     would_be_changed = []
     for package in packages:
-        installed, updated = query_package(module, package)
+        installed, updated, unknown = query_package(module, pacman_path, package)
         if ((state in ["present", "latest"] and not installed) or
                 (state == "absent" and installed) or
                 (state == "latest" and not updated)):
@@ -204,21 +264,42 @@ def check_packages(module, packages, state):
         module.exit_json(changed=True, msg="%s package(s) would be %s" % (
             len(would_be_changed), state))
     else:
-        module.exit_json(change=False, msg="package(s) already %s" % state)
+        module.exit_json(changed=False, msg="package(s) already %s" % state)
+
+
+def expand_package_groups(module, pacman_path, pkgs):
+    expanded = []
+
+    for pkg in pkgs:
+        cmd = "%s -Sgq %s" % (pacman_path, pkg)
+        rc, stdout, stderr = module.run_command(cmd, check_rc=False)
+
+        if rc == 0:
+            # A group was found matching the name, so expand it
+            for name in stdout.split('\n'):
+                name = name.strip()
+                if name:
+                    expanded.append(name)
+        else:
+            expanded.append(pkg)
+
+    return expanded
 
 
 def main():
     module = AnsibleModule(
         argument_spec    = dict(
-            name         = dict(aliases=['pkg']),
+            name         = dict(aliases=['pkg', 'package'], type='list'),
             state        = dict(default='present', choices=['present', 'installed', "latest", 'absent', 'removed']),
-            recurse      = dict(default='no', choices=BOOLEANS, type='bool'),
-            update_cache = dict(default='no', aliases=['update-cache'], choices=BOOLEANS, type='bool')),
-        required_one_of = [['name', 'update_cache']],
+            recurse      = dict(default=False, type='bool'),
+            force        = dict(default=False, type='bool'),
+            upgrade      = dict(default=False, type='bool'),
+            update_cache = dict(default=False, aliases=['update-cache'], type='bool')
+        ),
+        required_one_of = [['name', 'update_cache', 'upgrade']],
         supports_check_mode = True)
 
-    if not os.path.exists(PACMAN_PATH):
-        module.fail_json(msg="cannot find pacman, looking for %s" % (PACMAN_PATH))
+    pacman_path = module.get_bin_path('pacman', True)
 
     p = module.params
 
@@ -229,15 +310,18 @@ def main():
         p['state'] = 'absent'
 
     if p["update_cache"] and not module.check_mode:
-        update_package_db(module)
-        if not p['name']:
-            module.exit_json(changed=True, msg='updated the package master lists')
+        update_package_db(module, pacman_path)
+        if not (p['name'] or p['upgrade']):
+            module.exit_json(changed=True, msg='Updated the package master lists')
 
-    if p['update_cache'] and module.check_mode and not p['name']:
+    if p['update_cache'] and module.check_mode and not (p['name'] or p['upgrade']):
         module.exit_json(changed=True, msg='Would have updated the package cache')
 
+    if p['upgrade']:
+        upgrade(module, pacman_path)
+
     if p['name']:
-        pkgs = p['name'].split(',')
+        pkgs = expand_package_groups(module, pacman_path, p['name'])
 
         pkg_files = []
         for i, pkg in enumerate(pkgs):
@@ -250,14 +334,15 @@ def main():
                 pkg_files.append(None)
 
         if module.check_mode:
-            check_packages(module, pkgs, p['state'])
+            check_packages(module, pacman_path, pkgs, p['state'])
 
         if p['state'] in ['present', 'latest']:
-            install_packages(module, p['state'], pkgs, pkg_files)
+            install_packages(module, pacman_path, p['state'], pkgs, pkg_files)
         elif p['state'] == 'absent':
-            remove_packages(module, pkgs)
+            remove_packages(module, pacman_path, pkgs)
 
 # import module snippets
 from ansible.module_utils.basic import *
-    
-main()        
+
+if __name__ == "__main__":
+    main()

@@ -23,11 +23,6 @@ import shutil
 import stat
 import grp
 import pwd
-try:
-    import selinux
-    HAVE_SELINUX=True
-except ImportError:
-    HAVE_SELINUX=False
 
 DOCUMENTATION = '''
 ---
@@ -87,16 +82,23 @@ options:
       - 'force the creation of the symlinks in two cases: the source file does
         not exist (but will appear later); the destination exists and is a file (so, we need to unlink the
         "path" file and create symlink to the "src" file in place of it).'
+  follow:
+    required: false
+    default: "no"
+    choices: [ "yes", "no" ]
+    version_added: "1.8"
+    description:
+      - 'This flag indicates that filesystem links, if they exist, should be followed.'
 '''
 
 EXAMPLES = '''
 # change file ownership, group and mode. When specifying mode using octal numbers, first digit should always be 0.
 - file: path=/etc/foo.conf owner=foo group=foo mode=0644
 - file: src=/file/to/link/to dest=/path/to/symlink owner=foo group=foo state=link
-- file: src=/tmp/{{ item.path }} dest={{ item.dest }} state=link
+- file: src=/tmp/{{ item.src }} dest={{ item.dest }} state=link
   with_items:
-    - { path: 'x', dest: 'y' }
-    - { path: 'z', dest: 'k' }
+    - { src: 'x', dest: 'y' }
+    - { src: 'z', dest: 'k' }
 
 # touch a file, using symbolic modes to set the permissions (equivalent to 0644)
 - file: path=/etc/foo.conf state=touch mode="u=rw,g=r,o=r"
@@ -157,8 +159,8 @@ def main():
             original_basename = dict(required=False), # Internal use only, for recursive ops
             recurse  = dict(default=False, type='bool'),
             force = dict(required=False, default=False, type='bool'),
-            diff_peek = dict(default=None),
-            validate = dict(required=False, default=None),
+            diff_peek = dict(default=None), # Internal use only, for internal checks in the action plugins
+            validate = dict(required=False, default=None), # Internal use only, for template and copy
             src = dict(required=False, default=None),
         ),
         add_file_common_args=True,
@@ -189,6 +191,7 @@ def main():
         module.exit_json(path=path, changed=False, appears_binary=appears_binary)
 
     prev_state = get_state(path)
+
 
     # state should default to file, but since that creates many conflicts,
     # default to 'current' when it exists.
@@ -226,10 +229,23 @@ def main():
         module.fail_json(path=path, msg="recurse option requires state to be 'directory'")
 
     file_args = module.load_file_common_arguments(params)
+
     changed = False
+    diff = {'before':
+                {'path': path}
+            ,
+            'after':
+                {'path': path}
+            }
+
+    state_change = False
+    if prev_state != state:
+        diff['before']['state'] = prev_state
+        diff['after']['state'] = state
+        state_change = True
 
     if state == 'absent':
-        if state != prev_state:
+        if state_change:
             if not module.check_mode:
                 if prev_state == 'directory':
                     try:
@@ -241,13 +257,13 @@ def main():
                         os.unlink(path)
                     except Exception, e:
                         module.fail_json(path=path, msg="unlinking failed: %s " % str(e))
-            module.exit_json(path=path, changed=True)
+            module.exit_json(path=path, changed=True, diff=diff)
         else:
             module.exit_json(path=path, changed=False)
 
     elif state == 'file':
 
-        if state != prev_state:
+        if state_change:
             if follow and prev_state == 'link':
                 # follow symlink and operate on original
                 path = os.path.realpath(path)
@@ -258,8 +274,8 @@ def main():
             # file is not absent and any other state is a conflict
             module.fail_json(path=path, msg='file (%s) is %s, cannot continue' % (path, prev_state))
 
-        changed = module.set_fs_attributes_if_different(file_args, changed)
-        module.exit_json(path=path, changed=changed)
+        changed = module.set_fs_attributes_if_different(file_args, changed, diff)
+        module.exit_json(path=path, changed=changed, diff=diff)
 
     elif state == 'directory':
         if follow and prev_state == 'link':
@@ -268,40 +284,44 @@ def main():
 
         if prev_state == 'absent':
             if module.check_mode:
-                module.exit_json(changed=True)
+                module.exit_json(changed=True, diff=diff)
             changed = True
             curpath = ''
-            # Split the path so we can apply filesystem attributes recursively
-            # from the root (/) directory for absolute paths or the base path
-            # of a relative path.  We can then walk the appropriate directory
-            # path to apply attributes.
-            for dirname in path.strip('/').split('/'):
-                curpath = '/'.join([curpath, dirname])
-                # Remove leading slash if we're creating a relative path
-                if not os.path.isabs(path):
-                    curpath = curpath.lstrip('/')
-                if not os.path.exists(curpath):
-                    try:
-                        os.mkdir(curpath)
-                    except OSError, ex:
-                        # Possibly something else created the dir since the os.path.exists
-                        # check above. As long as it's a dir, we don't need to error out.
-                        if not (ex.errno == errno.EEXISTS and os.isdir(curpath)):
-                            raise
-                    tmp_file_args = file_args.copy()
-                    tmp_file_args['path']=curpath
-                    changed = module.set_fs_attributes_if_different(tmp_file_args, changed)
+
+            try:
+                # Split the path so we can apply filesystem attributes recursively
+                # from the root (/) directory for absolute paths or the base path
+                # of a relative path.  We can then walk the appropriate directory
+                # path to apply attributes.
+                for dirname in path.strip('/').split('/'):
+                    curpath = '/'.join([curpath, dirname])
+                    # Remove leading slash if we're creating a relative path
+                    if not os.path.isabs(path):
+                        curpath = curpath.lstrip('/')
+                    if not os.path.exists(curpath):
+                        try:
+                            os.mkdir(curpath)
+                        except OSError, ex:
+                            # Possibly something else created the dir since the os.path.exists
+                            # check above. As long as it's a dir, we don't need to error out.
+                            if not (ex.errno == errno.EEXIST and os.path.isdir(curpath)):
+                                raise
+                        tmp_file_args = file_args.copy()
+                        tmp_file_args['path']=curpath
+                        changed = module.set_fs_attributes_if_different(tmp_file_args, changed, diff)
+            except Exception, e:
+                module.fail_json(path=path, msg='There was an issue creating %s as requested: %s' % (curpath, str(e)))
 
         # We already know prev_state is not 'absent', therefore it exists in some form.
         elif prev_state != 'directory':
             module.fail_json(path=path, msg='%s already exists as a %s' % (path, prev_state))
 
-        changed = module.set_fs_attributes_if_different(file_args, changed)
+        changed = module.set_fs_attributes_if_different(file_args, changed, diff)
 
         if recurse:
             changed |= recursive_set_attributes(module, file_args['path'], follow, file_args)
 
-        module.exit_json(path=path, changed=changed)
+        module.exit_json(path=path, changed=changed, diff=diff)
 
     elif state in ['link','hard']:
 
@@ -370,10 +390,10 @@ def main():
                     module.fail_json(path=path, msg='Error while linking: %s' % str(e))
 
         if module.check_mode and not os.path.exists(path):
-            module.exit_json(dest=path, src=src, changed=changed)
+            module.exit_json(dest=path, src=src, changed=changed, diff=diff)
 
-        changed = module.set_fs_attributes_if_different(file_args, changed)
-        module.exit_json(dest=path, src=src, changed=changed)
+        changed = module.set_fs_attributes_if_different(file_args, changed, diff)
+        module.exit_json(dest=path, src=src, changed=changed, diff=diff)
 
     elif state == 'touch':
         if not module.check_mode:
@@ -391,7 +411,7 @@ def main():
             else:
                 module.fail_json(msg='Cannot touch other than files, directories, and hardlinks (%s is %s)' % (path, prev_state))
             try:
-                module.set_fs_attributes_if_different(file_args, True)
+                module.set_fs_attributes_if_different(file_args, True, diff)
             except SystemExit, e:
                 if e.code:
                     # We take this to mean that fail_json() was called from
@@ -401,7 +421,7 @@ def main():
                         os.remove(path)
                 raise e
 
-        module.exit_json(dest=path, changed=True)
+        module.exit_json(dest=path, changed=True, diff=diff)
 
     module.fail_json(path=path, msg='unexpected position reached')
 

@@ -37,6 +37,7 @@ If (($state -ne $FALSE) -and ($state -ne 'started') -and ($state -ne 'stopped') 
 
 # Path parameter
 $physical_path = Get-Attr $params "physical_path" $FALSE;
+$site_id = Get-Attr $params "site_id" $FALSE;
 
 # Application Pool Parameter
 $application_pool = Get-Attr $params "application_pool" $FALSE;
@@ -70,7 +71,7 @@ $result = New-Object psobject @{
 };
 
 # Site info
-$site = Get-Website -Name $name
+$site = Get-Website | Where { $_.Name -eq $name }
 
 Try {
   # Add site
@@ -91,6 +92,10 @@ Try {
       $site_parameters.ApplicationPool = $application_pool
     }
 
+    If ($site_id) {
+        $site_parameters.ID = $site_id
+    }
+
     If ($bind_port) {
       $site_parameters.Port = $bind_port
     }
@@ -103,6 +108,12 @@ Try {
       $site_parameters.HostHeader = $bind_hostname
     }
 
+    # Fix for error "New-Item : Index was outside the bounds of the array."
+    # This is a bug in the New-WebSite commandlet. Apparently there must be at least one site configured in IIS otherwise New-WebSite crashes.
+    # For more details, see http://stackoverflow.com/questions/3573889/ps-c-new-website-blah-throws-index-was-outside-the-bounds-of-the-array
+    $sites_list = get-childitem -Path IIS:\sites
+    if ($sites_list -eq $null) { $site_parameters.ID = 1 }
+
     $site = New-Website @site_parameters -Force
     $result.changed = $true
   }
@@ -113,7 +124,7 @@ Try {
     $result.changed = $true
   }
 
-  $site = Get-Website -Name $name
+  $site = Get-Website | Where { $_.Name -eq $name }
   If($site) {
     # Change Physical Path if needed
     if($physical_path) {
@@ -165,15 +176,21 @@ Catch
   Fail-Json (New-Object psobject) $_.Exception.Message
 }
 
-$site = Get-Website -Name $name
-$result.site = New-Object psobject @{
-  Name = $site.Name
-  ID = $site.ID
-  State = $site.State
-  PhysicalPath = $site.PhysicalPath
-  ApplicationPool = $site.applicationPool
-  Bindings = @($site.Bindings.Collection | ForEach-Object { $_.BindingInformation })
+if ($state -ne 'absent')
+{
+  $site = Get-Website | Where { $_.Name -eq $name }
 }
 
+if ($site)
+{
+  $result.site = New-Object psobject @{
+    Name = $site.Name
+    ID = $site.ID
+    State = $site.State
+    PhysicalPath = $site.PhysicalPath
+    ApplicationPool = $site.applicationPool
+    Bindings = @($site.Bindings.Collection | ForEach-Object { $_.BindingInformation })
+  }
+}
 
 Exit-Json $result

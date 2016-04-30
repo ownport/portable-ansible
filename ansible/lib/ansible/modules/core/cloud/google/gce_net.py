@@ -40,6 +40,7 @@ options:
   ipv4_range:
     description:
       - the IPv4 address range in CIDR notation for the network
+        this parameter is not mandatory when you specified existing network in name parameter, but when you create new network, this parameter is mandatory
     required: false
     aliases: ['cidr']
   fwname:
@@ -75,7 +76,7 @@ options:
     aliases: []
   state:
     description:
-      - desired state of the persistent disk
+      - desired state of the network or firewall
     required: false
     default: "present"
     choices: ["active", "present", "absent", "deleted"]
@@ -91,6 +92,14 @@ options:
     version_added: "1.6"
     description:
       - path to the pem file associated with the service account email
+        This option is deprecated. Use 'credentials_file'.
+    required: false
+    default: null
+    aliases: []
+  credentials_file:
+    version_added: "2.1.0"
+    description:
+      - path to the JSON file associated with the service account email
     required: false
     default: null
     aliases: []
@@ -104,7 +113,7 @@ options:
 
 requirements:
     - "python >= 2.6"
-    - "apache-libcloud >= 0.13.3"
+    - "apache-libcloud >= 0.13.3, >= 0.17.0 if using JSON credentials"
 author: "Eric Johnson (@erjohnso) <erjohnso@google.com>"
 '''
 
@@ -177,12 +186,13 @@ def main():
             state = dict(default='present'),
             service_account_email = dict(),
             pem_file = dict(),
+            credentials_file = dict(),
             project_id = dict(),
         )
     )
 
     if not HAS_LIBCLOUD:
-        module.exit_json(msg='libcloud with GCE support (0.13.3+) required for this module')
+        module.exit_json(msg='libcloud with GCE support (0.17.0+) required for this module')
 
     gce = gce_connect(module)
 
@@ -212,7 +222,7 @@ def main():
         # user wants to create a new network that doesn't yet exist
         if name and not network:
             if not ipv4_range:
-                module.fail_json(msg="Missing required 'ipv4_range' parameter",
+                module.fail_json(msg="Network '" + name + "' is not found. To create network, 'ipv4_range' parameter is required",
                     changed=False)
 
             try:
@@ -264,7 +274,7 @@ def main():
             if fw:
                 gce.ex_destroy_firewall(fw)
                 changed = True
-        if name:
+        elif name:
             json_output['name'] = name
             network = None
             try:

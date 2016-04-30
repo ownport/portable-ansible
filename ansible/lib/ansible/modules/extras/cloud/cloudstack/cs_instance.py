@@ -23,17 +23,22 @@ DOCUMENTATION = '''
 module: cs_instance
 short_description: Manages instances and virtual machines on Apache CloudStack based clouds.
 description:
-    - Deploy, start, restart, stop and destroy instances.
+    - Deploy, start, update, scale, restart, restore, stop and destroy instances.
 version_added: '2.0'
 author: "René Moser (@resmo)"
 options:
   name:
     description:
       - Host name of the instance. C(name) can only contain ASCII letters.
-    required: true
+      - Name will be generated (UUID) by CloudStack if not specified and can not be changed afterwards.
+      - Either C(name) or C(display_name) is required.
+    required: false
+    default: null
   display_name:
     description:
       - Custom display name of the instances.
+      - Display name will be set to C(name) if not specified.
+      - Either C(name) or C(display_name) is required.
     required: false
     default: null
   group:
@@ -46,11 +51,26 @@ options:
       - State of the instance.
     required: false
     default: 'present'
-    choices: [ 'deployed', 'started', 'stopped', 'restarted', 'destroyed', 'expunged', 'present', 'absent' ]
+    choices: [ 'deployed', 'started', 'stopped', 'restarted', 'restored', 'destroyed', 'expunged', 'present', 'absent' ]
   service_offering:
     description:
       - Name or id of the service offering of the new instance.
       - If not set, first found service offering is used.
+    required: false
+    default: null
+  cpu:
+    description:
+      - The number of CPUs to allocate to the instance, used with custom service offerings
+    required: false
+    default: null
+  cpu_speed:
+    description:
+      - The clock speed/shares allocated to the instance, used with custom service offerings
+    required: false
+    default: null
+  memory:
+    description:
+      - The memory allocated to the instance, used with custom service offerings
     required: false
     default: null
   template:
@@ -67,6 +87,15 @@ options:
       - Mutually exclusive with C(template) option.
     required: false
     default: null
+  template_filter:
+    description:
+      - Name of the filter used to search for the template or iso.
+      - Used for params C(iso) or C(template) on C(state=present).
+    required: false
+    default: 'executable'
+    choices: [ 'featured', 'self', 'selfexecutable', 'sharedexecutable', 'executable', 'community' ]
+    aliases: [ 'iso_filter' ]
+    version_added: '2.1'
   hypervisor:
     description:
       - Name the hypervisor to be used for creating the new instance.
@@ -97,6 +126,13 @@ options:
       - IPv6 address for default instance's network.
     required: false
     default: null
+  ip_to_networks:
+    description:
+      - "List of mappings in the form {'network': NetworkName, 'ip': 1.2.3.4}"
+      - Mutually exclusive with C(networks) option.
+    required: false
+    default: null
+    aliases: [ 'ip_to_network' ]
   disk_offering:
     description:
       - Name of the disk offering to be used.
@@ -107,11 +143,16 @@ options:
       - Disk size in GByte required if deploying instance from ISO.
     required: false
     default: null
+  root_disk_size:
+    description:
+      - Root disk size in GByte required if deploying instance with KVM hypervisor and want resize the root disk size at startup (need CloudStack >= 4.4, cloud-initramfs-growroot installed and enabled in the template)
+    required: false
+    default: null
   security_groups:
     description:
       - List of security groups the instance to be applied to.
     required: false
-    default: []
+    default: null
     aliases: [ 'security_group' ]
   domain:
     description:
@@ -193,36 +234,51 @@ EXAMPLES = '''
 - local_action:
     module: cs_instance
     name: web-vm-1
-    display_name: web-vm-01.example.com 
+    display_name: web-vm-01.example.com
     iso: Linux Debian 7 64-bit
     service_offering: 2cpu_2gb
     force: yes
 
-# Create or update a instance on Exoscale's public cloud
+# Create or update a instance on Exoscale's public cloud using display_name.
+# Note: user_data can be used to kickstart the instance using cloud-init yaml config.
 - local_action:
     module: cs_instance
-    name: web-vm-1
+    display_name: web-vm-1
     template: Linux Debian 7 64-bit
     service_offering: Tiny
     ssh_key: john@example.com
     tags:
       - { key: admin, value: john }
       - { key: foo,   value: bar }
+    user_data: |
+        #cloud-config
+        packages:
+          - nginx
 
-# Ensure a instance has stopped
+# Create an instance with multiple interfaces specifying the IP addresses
+- local_action:
+    module: cs_instance
+    name: web-vm-1
+    template: Linux Debian 7 64-bit
+    service_offering: Tiny
+    ip_to_networks:
+      - {'network': NetworkA, 'ip': '10.1.1.1'}
+      - {'network': NetworkB, 'ip': '192.168.1.1'}
+
+# Ensure an instance is stopped
 - local_action: cs_instance name=web-vm-1 state=stopped
 
-# Ensure a instance is running
+# Ensure an instance is running
 - local_action: cs_instance name=web-vm-1 state=started
 
-# Remove a instance
+# Remove an instance
 - local_action: cs_instance name=web-vm-1 state=absent
 '''
 
 RETURN = '''
 ---
 id:
-  description: ID of the instance.
+  description: UUID of the instance.
   returned: success
   type: string
   sample: 04589590-ac63-4ffc-93f5-b698b8ac38b6
@@ -353,7 +409,19 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackInstance(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackInstance, self).__init__(module)
+        self.returns = {
+            'group':                'group',
+            'hypervisor':           'hypervisor',
+            'instancename':         'instance_name',
+            'publicip':             'public_ip',
+            'passwordenabled':      'password_enabled',
+            'password':             'password',
+            'serviceofferingname':  'service_offering',
+            'isoname':              'iso',
+            'templatename':         'template',
+            'keypair':              'ssh_key',
+        }
         self.instance = None
         self.template = None
         self.iso = None
@@ -378,10 +446,7 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
         iso = self.module.params.get('iso')
 
         if not template and not iso:
-            self.module.fail_json(msg="Template or ISO is required.")
-
-        if template and iso:
-            self.module.fail_json(msg="Template are ISO are mutually exclusive.")
+            return None
 
         args                = {}
         args['account']     = self.get_account(key='name')
@@ -394,7 +459,7 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
             if self.template:
                 return self._get_by_key(key, self.template)
 
-            args['templatefilter'] = 'executable'
+            args['templatefilter'] = self.module.params.get('template_filter')
             templates = self.cs.listTemplates(**args)
             if templates:
                 for t in templates['template']:
@@ -406,7 +471,7 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
         elif iso:
             if self.iso:
                 return self._get_by_key(key, self.iso)
-            args['isofilter'] = 'executable'
+            args['isofilter'] = self.module.params.get('template_filter')
             isos = self.cs.listIsos(**args)
             if isos:
                 for i in isos['iso']:
@@ -433,7 +498,7 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
     def get_instance(self):
         instance = self.instance
         if not instance:
-            instance_name = self.module.params.get('name')
+            instance_name = self.get_or_fallback('name', 'display_name')
 
             args                = {}
             args['account']     = self.get_account(key='name')
@@ -443,14 +508,53 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
             instances = self.cs.listVirtualMachines(**args)
             if instances:
                 for v in instances['virtualmachine']:
-                    if instance_name in [ v['name'], v['displayname'], v['id'] ]:
+                    if instance_name.lower() in [ v['name'].lower(), v['displayname'].lower(), v['id'] ]:
                         self.instance = v
                         break
         return self.instance
 
 
-    def get_network_ids(self):
-        network_names = self.module.params.get('networks')
+    def get_iptonetwork_mappings(self):
+        network_mappings = self.module.params.get('ip_to_networks')
+        if network_mappings is None:
+            return
+
+        if network_mappings and self.module.params.get('networks'):
+            self.module.fail_json(msg="networks and ip_to_networks are mutually exclusive.")
+
+        network_names = [n['network'] for n in network_mappings]
+        ids = self.get_network_ids(network_names)
+        res = []
+        for i, data in enumerate(network_mappings):
+            res.append({'networkid': ids[i], 'ip': data['ip']})
+        return res
+
+
+    def security_groups_has_changed(self):
+        security_groups = self.module.params.get('security_groups')
+        if security_groups is None:
+            return False
+
+        security_groups = [s.lower() for s in security_groups]
+        instance_security_groups = self.instance.get('securitygroup',[])
+
+        instance_security_group_names = []
+        for instance_security_group in instance_security_groups:
+            if instance_security_group['name'].lower() not in security_groups:
+                return True
+            else:
+                instance_security_group_names.append(instance_security_group['name'].lower())
+
+        for security_group in security_groups:
+            if security_group not in instance_security_group_names:
+                return True
+        return False
+
+
+    def get_network_ids(self, network_names=None):
+        if network_names is None:
+            network_names = self.module.params.get('networks')
+
         if not network_names:
             return None
 
@@ -476,59 +580,84 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
         if len(network_ids) != len(network_names):
             self.module.fail_json(msg="Could not find all networks, networks list found: %s" % network_displaytexts)
 
-        return ','.join(network_ids)
+        return network_ids
 
 
-    def present_instance(self):
+    def present_instance(self, start_vm=True):
         instance = self.get_instance()
+
         if not instance:
-            instance = self.deploy_instance()
+            instance = self.deploy_instance(start_vm=start_vm)
         else:
-            instance = self.update_instance(instance)
+            instance = self.recover_instance(instance=instance)
+            instance = self.update_instance(instance=instance, start_vm=start_vm)
 
         # In check mode, we do not necessarely have an instance
         if instance:
             instance = self.ensure_tags(resource=instance, resource_type='UserVm')
+            # refresh instance data
+            self.instance = instance
 
         return instance
 
 
     def get_user_data(self):
         user_data = self.module.params.get('user_data')
-        if user_data:
-            user_data = base64.b64encode(user_data)
+        if user_data is not None:
+            user_data = base64.b64encode(str(user_data))
         return user_data
 
 
-    def get_display_name(self):
-        display_name = self.module.params.get('display_name')
-        if not display_name:
-            display_name = self.module.params.get('name')
-        return display_name
+    def get_details(self):
+        res = None
+        cpu = self.module.params.get('cpu')
+        cpu_speed = self.module.params.get('cpu_speed')
+        memory = self.module.params.get('memory')
+        if all([cpu, cpu_speed, memory]):
+            res = [{
+                'cpuNumber': cpu,
+                'cpuSpeed': cpu_speed,
+                'memory': memory,
+            }]
+        return res
 
 
-    def deploy_instance(self):
+    def deploy_instance(self, start_vm=True):
         self.result['changed'] = True
+        networkids = self.get_network_ids()
+        if networkids is not None:
+            networkids = ','.join(networkids)
 
         args                        = {}
         args['templateid']          = self.get_template_or_iso(key='id')
+        if not args['templateid']:
+            self.module.fail_json(msg="Template or ISO is required.")
+
         args['zoneid']              = self.get_zone(key='id')
         args['serviceofferingid']   = self.get_service_offering_id()
         args['account']             = self.get_account(key='name')
         args['domainid']            = self.get_domain(key='id')
         args['projectid']           = self.get_project(key='id')
         args['diskofferingid']      = self.get_disk_offering_id()
-        args['networkids']          = self.get_network_ids()
+        args['networkids']          = networkids
+        args['iptonetworklist']     = self.get_iptonetwork_mappings()
         args['userdata']            = self.get_user_data()
         args['keyboard']            = self.module.params.get('keyboard')
         args['ipaddress']           = self.module.params.get('ip_address')
         args['ip6address']          = self.module.params.get('ip6_address')
         args['name']                = self.module.params.get('name')
+        args['displayname']         = self.get_or_fallback('display_name', 'name')
         args['group']               = self.module.params.get('group')
         args['keypair']             = self.module.params.get('ssh_key')
         args['size']                = self.module.params.get('disk_size')
-        args['securitygroupnames']  = ','.join(self.module.params.get('security_groups'))
+        args['startvm']             = start_vm
+        args['rootdisksize']        = self.module.params.get('root_disk_size')
         args['affinitygroupnames']  = ','.join(self.module.params.get('affinity_groups'))
+        args['details']             = self.get_details()
+
+        security_groups = self.module.params.get('security_groups')
+        if security_groups is not None:
+            args['securitygroupnames']  = ','.join(security_groups)
 
         template_iso = self.get_template_or_iso()
         if 'hypervisor' not in template_iso:
@@ -547,30 +676,45 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
         return instance
 
 
-    def update_instance(self, instance):
-        args_service_offering                       = {}
-        args_service_offering['id']                 = instance['id']
-        args_service_offering['serviceofferingid']  = self.get_service_offering_id()
+    def update_instance(self, instance, start_vm=True):
+        # Service offering data
+        args_service_offering = {}
+        args_service_offering['id'] = instance['id']
+        if self.module.params.get('service_offering'):
+            args_service_offering['serviceofferingid'] = self.get_service_offering_id()
+        service_offering_changed = self._has_changed(args_service_offering, instance)
 
-        args_instance_update                        = {}
-        args_instance_update['id']                  = instance['id']
-        args_instance_update['group']               = self.module.params.get('group')
-        args_instance_update['displayname']         = self.get_display_name()
-        args_instance_update['userdata']            = self.get_user_data()
-        args_instance_update['ostypeid']            = self.get_os_type(key='id')
+        # Instance data
+        args_instance_update = {}
+        args_instance_update['id'] = instance['id']
+        args_instance_update['userdata'] = self.get_user_data()
+        args_instance_update['ostypeid'] = self.get_os_type(key='id')
+        if self.module.params.get('group'):
+            args_instance_update['group'] = self.module.params.get('group')
+        if self.module.params.get('display_name'):
+            args_instance_update['displayname'] = self.module.params.get('display_name')
+        instance_changed = self._has_changed(args_instance_update, instance)
 
-        args_ssh_key                                = {}
-        args_ssh_key['id']                          = instance['id']
-        args_ssh_key['keypair']                     = self.module.params.get('ssh_key')
-        args_ssh_key['projectid']                   = self.get_project(key='id')
-        
-        if self._has_changed(args_service_offering, instance) or \
-           self._has_changed(args_instance_update, instance) or \
-           self._has_changed(args_ssh_key, instance):
- 
+        # SSH key data
+        args_ssh_key = {}
+        args_ssh_key['id'] = instance['id']
+        args_ssh_key['projectid'] = self.get_project(key='id')
+        if self.module.params.get('ssh_key'):
+            args_ssh_key['keypair'] = self.module.params.get('ssh_key')
+        ssh_key_changed = self._has_changed(args_ssh_key, instance)
+
+        security_groups_changed = self.security_groups_has_changed()
+
+        changed = [
+            service_offering_changed,
+            instance_changed,
+            security_groups_changed,
+            ssh_key_changed,
+        ]
+
+        if True in changed:
             force = self.module.params.get('force')
             instance_state = instance['state'].lower()
-            
             if instance_state == 'stopped' or force:
                 self.result['changed'] = True
                 if not self.module.check_mode:
@@ -581,7 +725,7 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
                     self.instance = instance
 
                     # Change service offering
-                    if self._has_changed(args_service_offering, instance):
+                    if service_offering_changed:
                         res = self.cs.changeServiceForVirtualMachine(**args_service_offering)
                         if 'errortext' in res:
                             self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
@@ -589,7 +733,9 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
                         self.instance = instance
 
                     # Update VM
-                    if self._has_changed(args_instance_update, instance):
+                    if instance_changed or security_groups_changed:
+                        if security_groups_changed:
+                            args_instance_update['securitygroupnames'] = ','.join(self.module.params.get('security_groups'))
                         res = self.cs.updateVirtualMachine(**args_instance_update)
                         if 'errortext' in res:
                             self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
@@ -597,7 +743,7 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
                         self.instance = instance
 
                     # Reset SSH key
-                    if self._has_changed(args_ssh_key, instance):
+                    if ssh_key_changed:
                         instance = self.cs.resetSSHKeyForVirtualMachine(**args_ssh_key)
                         if 'errortext' in instance:
                             self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
@@ -606,8 +752,19 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
                         self.instance = instance
 
                     # Start VM again if it was running before
-                    if instance_state == 'running':
+                    if instance_state == 'running' and start_vm:
                         instance = self.start_instance()
+        return instance
+
+
+    def recover_instance(self, instance):
+        if instance['state'].lower() in [ 'destroying', 'destroyed' ]:
+            self.result['changed'] = True
+            if not self.module.check_mode:
+                res = self.cs.recoverVirtualMachine(id=instance['id'])
+                if 'errortext' in res:
+                    self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
+                instance = res['virtualmachine']
         return instance
 
 
@@ -653,117 +810,88 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
 
     def stop_instance(self):
         instance = self.get_instance()
-        if not instance:
-            self.module.fail_json(msg="Instance named '%s' not found" % self.module.params.get('name'))
+        # in check mode intance may not be instanciated
+        if instance:
+            if instance['state'].lower() in ['stopping', 'stopped']:
+                return instance
 
-        if instance['state'].lower() in ['stopping', 'stopped']:
-            return instance
+            if instance['state'].lower() in ['starting', 'running']:
+                self.result['changed'] = True
+                if not self.module.check_mode:
+                    instance = self.cs.stopVirtualMachine(id=instance['id'])
 
-        if instance['state'].lower() in ['starting', 'running']:
-            self.result['changed'] = True
-            if not self.module.check_mode:
-                instance = self.cs.stopVirtualMachine(id=instance['id'])
+                    if 'errortext' in instance:
+                        self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
 
-                if 'errortext' in instance:
-                    self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
-
-                poll_async = self.module.params.get('poll_async')
-                if poll_async:
-                    instance = self._poll_job(instance, 'virtualmachine')
+                    poll_async = self.module.params.get('poll_async')
+                    if poll_async:
+                        instance = self._poll_job(instance, 'virtualmachine')
         return instance
 
 
     def start_instance(self):
         instance = self.get_instance()
-        if not instance:
-            self.module.fail_json(msg="Instance named '%s' not found" % module.params.get('name'))
+        # in check mode intance may not be instanciated
+        if instance:
+            if instance['state'].lower() in ['starting', 'running']:
+                return instance
 
-        if instance['state'].lower() in ['starting', 'running']:
-            return instance
+            if instance['state'].lower() in ['stopped', 'stopping']:
+                self.result['changed'] = True
+                if not self.module.check_mode:
+                    instance = self.cs.startVirtualMachine(id=instance['id'])
 
-        if instance['state'].lower() in ['stopped', 'stopping']:
-            self.result['changed'] = True
-            if not self.module.check_mode:
-                instance = self.cs.startVirtualMachine(id=instance['id'])
+                    if 'errortext' in instance:
+                        self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
 
-                if 'errortext' in instance:
-                    self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
-
-                poll_async = self.module.params.get('poll_async')
-                if poll_async:
-                    instance = self._poll_job(instance, 'virtualmachine')
+                    poll_async = self.module.params.get('poll_async')
+                    if poll_async:
+                        instance = self._poll_job(instance, 'virtualmachine')
         return instance
 
 
     def restart_instance(self):
         instance = self.get_instance()
-        if not instance:
-            module.fail_json(msg="Instance named '%s' not found" % self.module.params.get('name'))
+        # in check mode intance may not be instanciated
+        if instance:
+            if instance['state'].lower() in [ 'running', 'starting' ]:
+                self.result['changed'] = True
+                if not self.module.check_mode:
+                    instance = self.cs.rebootVirtualMachine(id=instance['id'])
 
-        if instance['state'].lower() in [ 'running', 'starting' ]:
-            self.result['changed'] = True
-            if not self.module.check_mode:
-                instance = self.cs.rebootVirtualMachine(id=instance['id'])
+                    if 'errortext' in instance:
+                        self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
 
-                if 'errortext' in instance:
-                    self.module.fail_json(msg="Failed: '%s'" % instance['errortext'])
+                    poll_async = self.module.params.get('poll_async')
+                    if poll_async:
+                        instance = self._poll_job(instance, 'virtualmachine')
 
-                poll_async = self.module.params.get('poll_async')
-                if poll_async:
-                    instance = self._poll_job(instance, 'virtualmachine')
+            elif instance['state'].lower() in [ 'stopping', 'stopped' ]:
+                instance = self.start_instance()
+        return instance
 
-        elif instance['state'].lower() in [ 'stopping', 'stopped' ]:
-            instance = self.start_instance()
+
+    def restore_instance(self):
+        instance = self.get_instance()
+        self.result['changed'] = True
+        # in check mode intance may not be instanciated
+        if instance:
+            args = {}
+            args['templateid'] = self.get_template_or_iso(key='id')
+            args['virtualmachineid'] = instance['id']
+            res = self.cs.restoreVirtualMachine(**args)
+            if 'errortext' in res:
+                self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
+
+            poll_async = self.module.params.get('poll_async')
+            if poll_async:
+                instance = self._poll_job(res, 'virtualmachine')
         return instance
 
 
     def get_result(self, instance):
+        super(AnsibleCloudStackInstance, self).get_result(instance)
         if instance:
-            if 'id' in instance:
-                self.result['id'] = instance['id']
-            if 'name' in instance:
-                self.result['name'] = instance['name']
-            if 'displayname' in instance:
-                self.result['display_name'] = instance['displayname']
-            if 'group' in instance:
-                self.result['group'] = instance['group']
-            if 'domain' in instance:
-                self.result['domain'] = instance['domain']
-            if 'account' in instance:
-                self.result['account'] = instance['account']
-            if 'project' in instance:
-                self.result['project'] = instance['project']
-            if 'hypervisor' in instance:
-                self.result['hypervisor'] = instance['hypervisor']
-            if 'instancename' in instance:
-                self.result['instance_name'] = instance['instancename']
-            if 'publicip' in instance:
-                self.result['public_ip'] = instance['public_ip']
-            if 'passwordenabled' in instance:
-                self.result['password_enabled'] = instance['passwordenabled']
-            if 'password' in instance:
-                self.result['password'] = instance['password']
-            if 'serviceofferingname' in instance:
-                self.result['service_offering'] = instance['serviceofferingname']
-            if 'zonename' in instance:
-                self.result['zone'] = instance['zonename']
-            if 'templatename' in instance:
-                self.result['template'] = instance['templatename']
-            if 'isoname' in instance:
-                self.result['iso'] = instance['isoname']
-            if 'keypair' in instance:
-                self.result['ssh_key'] = instance['keypair']
-            if 'created' in instance:
-                self.result['created'] = instance['created']
-            if 'state' in instance:
-                self.result['state'] = instance['state']
-            if 'tags' in instance:
-                self.result['tags'] = []
-                for tag in instance['tags']:
-                    result_tag          = {}
-                    result_tag['key']   = tag['key']
-                    result_tag['value'] = tag['value']
-                    self.result['tags'].append(result_tag)
             if 'securitygroup' in instance:
                 security_groups = []
                 for securitygroup in instance['securitygroup']:
@@ -776,46 +904,60 @@ class AnsibleCloudStackInstance(AnsibleCloudStack):
                 self.result['affinity_groups'] = affinity_groups
             if 'nic' in instance:
                 for nic in instance['nic']:
-                    if nic['isdefault']:
+                    if nic['isdefault'] and 'ipaddress' in nic:
                         self.result['default_ip'] = nic['ipaddress']
         return self.result
 
+
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(default=None),
+        display_name = dict(default=None),
+        group = dict(default=None),
+        state = dict(choices=['present', 'deployed', 'started', 'stopped', 'restarted', 'restored', 'absent', 'destroyed', 'expunged'], default='present'),
+        service_offering = dict(default=None),
+        cpu = dict(default=None, type='int'),
+        cpu_speed = dict(default=None, type='int'),
+        memory = dict(default=None, type='int'),
+        template = dict(default=None),
+        iso = dict(default=None),
+        template_filter = dict(default="executable", aliases=['iso_filter'], choices=['featured', 'self', 'selfexecutable', 'sharedexecutable', 'executable', 'community']),
+        networks = dict(type='list', aliases=[ 'network' ], default=None),
+        ip_to_networks = dict(type='list', aliases=['ip_to_network'], default=None),
+        ip_address = dict(defaul=None),
+        ip6_address = dict(defaul=None),
+        disk_offering = dict(default=None),
+        disk_size = dict(type='int', default=None),
+        root_disk_size = dict(type='int', default=None),
+        keyboard = dict(choices=['de', 'de-ch', 'es', 'fi', 'fr', 'fr-be', 'fr-ch', 'is', 'it', 'jp', 'nl-be', 'no', 'pt', 'uk', 'us'], default=None),
+        hypervisor = dict(choices=CS_HYPERVISORS, default=None),
+        security_groups = dict(type='list', aliases=[ 'security_group' ], default=None),
+        affinity_groups = dict(type='list', aliases=[ 'affinity_group' ], default=[]),
+        domain = dict(default=None),
+        account = dict(default=None),
+        project = dict(default=None),
+        user_data = dict(default=None),
+        zone = dict(default=None),
+        ssh_key = dict(default=None),
+        force = dict(type='bool', default=False),
+        tags = dict(type='list', aliases=[ 'tag' ], default=None),
+        poll_async = dict(type='bool', default=True),
+    ))
+
+    required_together = cs_required_together()
+    required_together.extend([
+        ['cpu', 'cpu_speed', 'memory'],
+    ])
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            display_name = dict(default=None),
-            group = dict(default=None),
-            state = dict(choices=['present', 'deployed', 'started', 'stopped', 'restarted', 'absent', 'destroyed', 'expunged'], default='present'),
-            service_offering = dict(default=None),
-            template = dict(default=None),
-            iso = dict(default=None),
-            networks = dict(type='list', aliases=[ 'network' ], default=None),
-            ip_address = dict(defaul=None),
-            ip6_address = dict(defaul=None),
-            disk_offering = dict(default=None),
-            disk_size = dict(type='int', default=None),
-            keyboard = dict(choices=['de', 'de-ch', 'es', 'fi', 'fr', 'fr-be', 'fr-ch', 'is', 'it', 'jp', 'nl-be', 'no', 'pt', 'uk', 'us'], default=None),
-            hypervisor = dict(choices=['KVM', 'VMware', 'BareMetal', 'XenServer', 'LXC', 'HyperV', 'UCS', 'OVM'], default=None),
-            security_groups = dict(type='list', aliases=[ 'security_group' ], default=[]),
-            affinity_groups = dict(type='list', aliases=[ 'affinity_group' ], default=[]),
-            domain = dict(default=None),
-            account = dict(default=None),
-            project = dict(default=None),
-            user_data = dict(default=None),
-            zone = dict(default=None),
-            ssh_key = dict(default=None),
-            force = dict(choices=BOOLEANS, default=False),
-            tags = dict(type='list', aliases=[ 'tag' ], default=None),
-            poll_async = dict(choices=BOOLEANS, default=True),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
+        argument_spec=argument_spec,
+        required_together=required_together,
+        required_one_of = (
+            ['display_name', 'name'],
         ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
+        mutually_exclusive = (
+            ['template', 'iso'],
         ),
         supports_check_mode=True
     )
@@ -834,16 +976,23 @@ def main():
         elif state in ['expunged']:
             instance = acs_instance.expunge_instance()
 
+        elif state in ['restored']:
+            acs_instance.present_instance()
+            instance = acs_instance.restore_instance()
+
         elif state in ['present', 'deployed']:
             instance = acs_instance.present_instance()
 
         elif state in ['stopped']:
+            acs_instance.present_instance(start_vm=False)
             instance = acs_instance.stop_instance()
 
         elif state in ['started']:
+            acs_instance.present_instance()
             instance = acs_instance.start_instance()
 
         elif state in ['restarted']:
+            acs_instance.present_instance()
             instance = acs_instance.restart_instance()
 
         if instance and 'state' in instance and instance['state'].lower() == 'error':
@@ -851,7 +1000,7 @@ def main():
 
         result = acs_instance.get_result(instance)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

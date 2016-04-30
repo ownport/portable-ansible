@@ -32,6 +32,12 @@ options:
     required: true
     default: null
     aliases: []
+  site_id:
+    description:
+      - Explicitly set the IIS numeric ID for a site. Note that this value cannot be changed after the website has been created.
+    required: false
+    version_added: "2.1"
+    default: null
   state:
     description:
       - State of the web site

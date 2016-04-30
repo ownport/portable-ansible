@@ -27,10 +27,12 @@ import tempfile
 DOCUMENTATION = """
 ---
 module: lineinfile
-author: 
+author:
     - "Daniel Hokka Zakrissoni (@dhozac)"
     - "Ahti Kitsik (@ahtik)"
-extends_documentation_fragment: files
+extends_documentation_fragment:
+    - files
+    - validate
 short_description: Ensure a particular line is in a file, or replace an
                    existing line using a back-referenced regular expression.
 description:
@@ -88,7 +90,7 @@ options:
       - Used with C(state=present). If specified, the line will be inserted
         after the last match of specified regular expression. A special value is
         available; C(EOF) for inserting the line at the end of the file. 
-        If specified regular expresion has no matches, EOF will be used instead.
+        If specified regular expression has no matches, EOF will be used instead.
         May not be used with C(backrefs).
     choices: [ 'EOF', '*regex*' ]
   insertbefore:
@@ -98,7 +100,7 @@ options:
       - Used with C(state=present). If specified, the line will be inserted
         before the last match of specified regular expression. A value is 
         available; C(BOF) for inserting the line at the beginning of the file.
-        If specified regular expresion has no matches, the line will be
+        If specified regular expression has no matches, the line will be
         inserted at the end of the file.  May not be used with C(backrefs).
     choices: [ 'BOF', '*regex*' ]
   create:
@@ -116,16 +118,6 @@ options:
      description:
        - Create a backup file including the timestamp information so you can
          get the original file back if you somehow clobbered it incorrectly.
-  validate:
-     required: false
-     description:
-       - validation to run before copying into place. 
-         Use %s in the command to indicate the current file to validate.
-         The command is passed securely so shell features like
-         expansion and pipes won't work.
-     required: false
-     default: None
-     version_added: "1.4"
   others:
      description:
        - All arguments accepted by the M(file) module also work here.
@@ -175,10 +167,10 @@ def write_changes(module,lines,dest):
     if valid:
         module.atomic_move(tmpfile, os.path.realpath(dest))
 
-def check_file_attrs(module, changed, message):
+def check_file_attrs(module, changed, message, diff):
 
     file_args = module.load_file_common_arguments(module.params)
-    if module.set_fs_attributes_if_different(file_args, False):
+    if module.set_fs_attributes_if_different(file_args, False, diff=diff):
 
         if changed:
             message += " and "
@@ -190,6 +182,11 @@ def check_file_attrs(module, changed, message):
 
 def present(module, dest, regexp, line, insertafter, insertbefore, create,
             backup, backrefs):
+
+    diff = {'before': '',
+            'after': '',
+            'before_header': '%s (content)' % dest,
+            'after_header': '%s (content)' % dest}
 
     if not os.path.exists(dest):
         if not create:
@@ -203,7 +200,8 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
         lines = f.readlines()
         f.close()
 
-    msg = ""
+    if module._diff:
+        diff['before'] = ''.join(lines)
 
     if regexp is not None:
         mre = re.compile(regexp)
@@ -279,6 +277,9 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
         msg = 'line added'
         changed = True
 
+    if module._diff:
+        diff['after'] = ''.join(lines)
+
     backupdest = ""
     if changed and not module.check_mode:
         if backup and os.path.exists(dest):
@@ -286,10 +287,16 @@ def present(module, dest, regexp, line, insertafter, insertbefore, create,
         write_changes(module, lines, dest)
 
     if module.check_mode and not os.path.exists(dest):
-        module.exit_json(changed=changed, msg=msg, backup=backupdest)
+        module.exit_json(changed=changed, msg=msg, backup=backupdest, diff=diff)
 
-    msg, changed = check_file_attrs(module, changed, msg)
-    module.exit_json(changed=changed, msg=msg, backup=backupdest)
+    attr_diff = {}
+    msg, changed = check_file_attrs(module, changed, msg, attr_diff)
+
+    attr_diff['before_header'] = '%s (file attributes)' % dest
+    attr_diff['after_header'] = '%s (file attributes)' % dest
+
+    difflist = [diff, attr_diff]
+    module.exit_json(changed=changed, msg=msg, backup=backupdest, diff=difflist)
 
 
 def absent(module, dest, regexp, line, backup):
@@ -297,11 +304,19 @@ def absent(module, dest, regexp, line, backup):
     if not os.path.exists(dest):
         module.exit_json(changed=False, msg="file not present")
 
-    msg = ""
+    msg = ''
+    diff = {'before': '',
+            'after': '',
+            'before_header': '%s (content)' % dest,
+            'after_header': '%s (content)' % dest}
 
     f = open(dest, 'rb')
     lines = f.readlines()
     f.close()
+
+    if module._diff:
+        diff['before'] = ''.join(lines)
+
     if regexp is not None:
         cre = re.compile(regexp)
     found = []
@@ -317,6 +332,10 @@ def absent(module, dest, regexp, line, backup):
 
     lines = filter(matcher, lines)
     changed = len(found) > 0
+
+    if module._diff:
+        diff['after'] = ''.join(lines)
+
     backupdest = ""
     if changed and not module.check_mode:
         if backup:
@@ -326,8 +345,15 @@ def absent(module, dest, regexp, line, backup):
     if changed:
         msg = "%s line(s) removed" % len(found)
 
-    msg, changed = check_file_attrs(module, changed, msg)
-    module.exit_json(changed=changed, found=len(found), msg=msg, backup=backupdest)
+    attr_diff = {}
+    msg, changed = check_file_attrs(module, changed, msg, attr_diff)
+
+    attr_diff['before_header'] = '%s (file attributes)' % dest
+    attr_diff['after_header'] = '%s (file attributes)' % dest
+
+    difflist = [diff, attr_diff]
+
+    module.exit_json(changed=changed, found=len(found), msg=msg, backup=backupdest, diff=difflist)
 
 
 def main():

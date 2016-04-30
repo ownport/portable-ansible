@@ -93,8 +93,9 @@ import sys
 try:
     import libvirt
 except ImportError:
-    print "failed=True msg='libvirt python module unavailable'"
-    sys.exit(1)
+    HAS_VIRT = False
+else:
+    HAS_VIRT = True
 
 ALL_COMMANDS = []
 VM_COMMANDS = ['create','status', 'start', 'stop', 'pause', 'unpause',
@@ -127,6 +128,9 @@ class LibvirtConnection(object):
 
         if "xen" in stdout:
             conn = libvirt.open(None)
+        elif "esx" in uri:
+            auth = [[libvirt.VIR_CRED_AUTHNAME, libvirt.VIR_CRED_NOECHOPROMPT], [], None]
+            conn = libvirt.openAuth(uri, auth)
         else:
             conn = libvirt.open(uri)
 
@@ -480,6 +484,11 @@ def main():
         uri = dict(default='qemu:///system'),
         xml = dict(),
     ))
+
+    if not HAS_VIRT:
+        module.fail_json(
+            msg='The `libvirt` module is not importable. Check the requirements.'
+        )
 
     rc = VIRT_SUCCESS
     try:

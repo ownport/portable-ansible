@@ -51,7 +51,7 @@ options:
     description:
       - Optional URL to submit the notification to. Use to send notifications to Airbrake-compliant tools like Errbit.
     required: false
-    default: "https://airbrake.io/deploys"
+    default: "https://airbrake.io/deploys.txt"
     version_added: "1.5"
   validate_certs:
     description:
@@ -81,7 +81,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec=dict(
-            token=dict(required=True),
+            token=dict(required=True, no_log=True),
             environment=dict(required=True),
             user=dict(required=False),
             repo=dict(required=False),

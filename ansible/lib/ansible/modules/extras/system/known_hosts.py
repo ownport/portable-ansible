@@ -58,7 +58,7 @@ EXAMPLES = '''
 # Example using with_file to set the system known_hosts file
 - name: tell the host about our servers it might want to ssh to
   known_hosts: path='/etc/ssh/ssh_known_hosts'
-               host='foo.com.invalid'
+               name='foo.com.invalid'
                key="{{ lookup('file', 'pubkeys/foo.com.invalid') }}"
 '''
 
@@ -92,8 +92,8 @@ def enforce_state(module, params):
     #Find the ssh-keygen binary
     sshkeygen = module.get_bin_path("ssh-keygen",True)
 
-    #trailing newline in files gets lost, so re-add if necessary
-    if key is not None and key[-1]!='\n':
+    # Trailing newline in files gets lost, so re-add if necessary
+    if key and key[-1] != '\n':
         key+='\n'
 
     if key is None and state != "absent":

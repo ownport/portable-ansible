@@ -18,12 +18,14 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import socket
-import datetime
-import time
-import sys
-import re
 import binascii
+import datetime
+import math
+import re
+import select
+import socket
+import sys
+import time
 
 HAS_PSUTIL = False
 try:
@@ -101,7 +103,7 @@ options:
 notes:
   - The ability to use search_regex with a port connection was added in 1.7.
 requirements: []
-author: 
+author:
     - "Jeroen Hoekx (@jhoekx)"
     - "John Jarvis (@jarv)"
     - "Andrii Radyk (@AnderEnder)"
@@ -125,7 +127,7 @@ EXAMPLES = '''
 - wait_for: path=/tmp/foo search_regex=completed
 
 # wait until the lock file is removed
-- wait_for: path=/var/lock/file.lock state=absent 
+- wait_for: path=/var/lock/file.lock state=absent
 
 # wait until the process is finished and pid was destroyed
 - wait_for: path=/proc/3466/status state=absent
@@ -155,6 +157,10 @@ class TCPConnectionInfo(object):
         socket.AF_INET: '0.0.0.0',
         socket.AF_INET6: '::',
     }
+    ipv4_mapped_ipv6_address = {
+        'prefix': '::ffff',
+        'match_all': '::ffff:0.0.0.0'
+    }
     connection_states = {
         '01': 'ESTABLISHED',
         '02': 'SYN_SENT',
@@ -169,17 +175,19 @@ class TCPConnectionInfo(object):
 
     def __init__(self, module):
         self.module = module
-        (self.family, self.ip) = _convert_host_to_ip(self.module.params['host'])
+        self.ips = _convert_host_to_ip(module.params['host'])
         self.port = int(self.module.params['port'])
         self.exclude_ips = self._get_exclude_ips()
         if not HAS_PSUTIL:
             module.fail_json(msg="psutil module required for wait_for")
 
     def _get_exclude_ips(self):
-        if self.module.params['exclude_hosts'] is None:
-            return []
         exclude_hosts = self.module.params['exclude_hosts']
-        return [ _convert_host_to_hex(h)[1] for h in exclude_hosts ]
+        exclude_ips = []
+        if exclude_hosts is not None:
+            for host in exclude_hosts:
+                exclude_ips.extend(_convert_host_to_ip(host))
+        return exclude_ips
 
     def get_active_connections_count(self):
         active_connections = 0
@@ -189,10 +197,18 @@ class TCPConnectionInfo(object):
                 if conn.status not in self.connection_states.values():
                     continue
                 (local_ip, local_port) = conn.local_address
-                if self.port == local_port and self.ip in [self.match_all_ips[self.family], local_ip]:
-                     (remote_ip, remote_port) = conn.remote_address
-                     if remote_ip not in self.exclude_ips:
-                         active_connections += 1
+                if self.port != local_port:
+                    continue
+                (remote_ip, remote_port) = conn.remote_address
+                if (conn.family, remote_ip) in self.exclude_ips:
+                    continue
+                if any((
+                    (conn.family, local_ip) in self.ips,
+                    (conn.family, self.match_all_ips[conn.family]) in self.ips,
+                    local_ip.startswith(self.ipv4_mapped_ipv6_address['prefix']) and
+                        (conn.family, self.ipv4_mapped_ipv6_address['match_all']) in self.ips,
+                )):
+                    active_connections += 1
         return active_connections
 
 
@@ -216,37 +232,52 @@ class LinuxTCPConnectionInfo(TCPConnectionInfo):
         socket.AF_INET: '00000000',
         socket.AF_INET6: '00000000000000000000000000000000',
     }
+    ipv4_mapped_ipv6_address = {
+        'prefix': '0000000000000000FFFF0000',
+        'match_all': '0000000000000000FFFF000000000000'
+    }
     local_address_field = 1
     remote_address_field = 2
     connection_state_field = 3
 
     def __init__(self, module):
         self.module = module
-        (self.family, self.ip) = _convert_host_to_hex(module.params['host'])
+        self.ips = _convert_host_to_hex(module.params['host'])
         self.port = "%0.4X" % int(module.params['port'])
         self.exclude_ips = self._get_exclude_ips()
 
     def _get_exclude_ips(self):
-        if self.module.params['exclude_hosts'] is None:
-            return []
         exclude_hosts = self.module.params['exclude_hosts']
-        return [ _convert_host_to_hex(h) for h in exclude_hosts ]
+        exclude_ips = []
+        if exclude_hosts is not None:
+            for host in exclude_hosts:
+                exclude_ips.extend(_convert_host_to_hex(host))
+        return exclude_ips
 
     def get_active_connections_count(self):
         active_connections = 0
-        f = open(self.source_file[self.family])
-        for tcp_connection in f.readlines():
-            tcp_connection = tcp_connection.strip().split()
-            if tcp_connection[self.local_address_field] == 'local_address':
-                continue
-            if tcp_connection[self.connection_state_field] not in self.connection_states:
-                continue
-            (local_ip, local_port) = tcp_connection[self.local_address_field].split(':')
-            if self.port == local_port and self.ip in [self.match_all_ips[self.family], local_ip]:
-                 (remote_ip, remote_port) = tcp_connection[self.remote_address_field].split(':')
-                 if remote_ip not in self.exclude_ips:
-                     active_connections += 1
-        f.close()
+        for family in self.source_file.keys():
+            f = open(self.source_file[family])
+            for tcp_connection in f.readlines():
+                tcp_connection = tcp_connection.strip().split()
+                if tcp_connection[self.local_address_field] == 'local_address':
+                    continue
+                if tcp_connection[self.connection_state_field] not in self.connection_states:
+                    continue
+                (local_ip, local_port) = tcp_connection[self.local_address_field].split(':')
+                if self.port != local_port:
+                    continue
+                (remote_ip, remote_port) = tcp_connection[self.remote_address_field].split(':')
+                if (family, remote_ip) in self.exclude_ips:
+                    continue
+                if any((
+                    (family, local_ip) in self.ips,
+                    (family, self.match_all_ips[family]) in self.ips,
+                    local_ip.startswith(self.ipv4_mapped_ipv6_address['prefix']) and
+                        (family, self.ipv4_mapped_ipv6_address['match_all']) in self.ips,
+                )):
+                    active_connections += 1
+            f.close()
         return active_connections
 
 
@@ -258,10 +289,16 @@ def _convert_host_to_ip(host):
         host: String with either hostname, IPv4, or IPv6 address
 
     Returns:
-        Tuple containing address family and IP
+        List of tuples containing address family and IP
     """
-    addrinfo = socket.getaddrinfo(host, 80, 0, 0, socket.SOL_TCP)[0]
-    return (addrinfo[0], addrinfo[4][0])
+    addrinfo = socket.getaddrinfo(host, 80, 0, 0, socket.SOL_TCP)
+    ips = []
+    for family, socktype, proto, canonname, sockaddr in addrinfo:
+        ip = sockaddr[0]
+        ips.append((family, ip))
+        if family == socket.AF_INET:
+            ips.append((socket.AF_INET6, "::ffff:" + ip))
+    return ips
 
 def _convert_host_to_hex(host):
     """
@@ -274,43 +311,55 @@ def _convert_host_to_hex(host):
         host: String with either hostname, IPv4, or IPv6 address
 
     Returns:
-        Tuple containing address family and the little-endian converted host
+        List of tuples containing address family and the
+        little-endian converted host
     """
-    (family, ip) = _convert_host_to_ip(host)
-    hexed = binascii.hexlify(socket.inet_pton(family, ip)).upper()
-    if family == socket.AF_INET:
-        hexed = _little_endian_convert_32bit(hexed)
-    elif family == socket.AF_INET6:
-        # xrange loops through each 8 character (4B) set in the 128bit total
-        hexed = "".join([ _little_endian_convert_32bit(hexed[x:x+8]) for x in xrange(0, 32, 8) ])
-    return (family, hexed)
+    ips = []
+    if host is not None:
+        for family, ip in _convert_host_to_ip(host):
+            hexip_nf = binascii.b2a_hex(socket.inet_pton(family, ip))
+            hexip_hf = ""
+            for i in range(0, len(hexip_nf), 8):
+                ipgroup_nf = hexip_nf[i:i+8]
+                ipgroup_hf = socket.ntohl(int(ipgroup_nf, base=16))
+                hexip_hf = "%s%08X" % (hexip_hf, ipgroup_hf)
+            ips.append((family, hexip_hf))
+    return ips
 
-def _little_endian_convert_32bit(block):
+def _create_connection( (host, port), connect_timeout):
     """
-    Convert to little-endian, effectively transposing
-    the order of the four byte word
-    12345678 -> 78563412
+    Connect to a 2-tuple (host, port) and return
+    the socket object.
 
     Args:
-        block: String containing a 4 byte hex representation
-
+        2-tuple (host, port) and connection timeout
     Returns:
-        String containing the little-endian converted block
+        Socket object
     """
-    # xrange starts at 6, and increments by -2 until it reaches -2
-    # which lets us start at the end of the string block and work to the begining
-    return "".join([ block[x:x+2] for x in xrange(6, -2, -2) ])
+    if sys.version_info < (2, 6):
+        (family, _) = _convert_host_to_ip(host)
+        connect_socket = socket.socket(family, socket.SOCK_STREAM)
+        connect_socket.settimeout(connect_timeout)
+        connect_socket.connect( (host, port) )
+    else:
+        connect_socket = socket.create_connection( (host, port), connect_timeout)
+    return connect_socket
+
+def _timedelta_total_seconds(timedelta):
+    return (
+        timedelta.microseconds + 0.0 +
+        (timedelta.seconds + timedelta.days * 24 * 3600) * 10 ** 6) / 10 ** 6
 
 def main():
 
     module = AnsibleModule(
         argument_spec = dict(
             host=dict(default='127.0.0.1'),
-            timeout=dict(default=300),
-            connect_timeout=dict(default=5),
-            delay=dict(default=0),
-            port=dict(default=None),
-            path=dict(default=None),
+            timeout=dict(default=300, type='int'),
+            connect_timeout=dict(default=5, type='int'),
+            delay=dict(default=0, type='int'),
+            port=dict(default=None, type='int'),
+            path=dict(default=None, type='path'),
             search_regex=dict(default=None),
             state=dict(default='started', choices=['started', 'stopped', 'present', 'absent', 'drained']),
             exclude_hosts=dict(default=None, type='list')
@@ -320,16 +369,17 @@ def main():
     params = module.params
 
     host = params['host']
-    timeout = int(params['timeout'])
-    connect_timeout = int(params['connect_timeout'])
-    delay = int(params['delay'])
-    if params['port']:
-        port = int(params['port'])
-    else:
-        port = None
+    timeout = params['timeout']
+    connect_timeout = params['connect_timeout']
+    delay = params['delay']
+    port = params['port']
     state = params['state']
     path = params['path']
     search_regex = params['search_regex']
+    if search_regex is not None:
+        compiled_search_re = re.compile(search_regex, re.MULTILINE)
+    else:
+        compiled_search_re = None
 
     if port and path:
         module.fail_json(msg="port and path parameter can not both be passed to wait_for")
@@ -362,10 +412,8 @@ def main():
                 except IOError:
                     break
             elif port:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(connect_timeout)
                 try:
-                    s.connect( (host, port) )
+                    s = _create_connection( (host, port), connect_timeout)
                     s.shutdown(socket.SHUT_RDWR)
                     s.close()
                     time.sleep(1)
@@ -387,57 +435,72 @@ def main():
             if path:
                 try:
                     os.stat(path)
-                    if search_regex:
-                        try:
-                            f = open(path)
-                            try:
-                                if re.search(search_regex, f.read(), re.MULTILINE):
-                                    break
-                                else:
-                                    time.sleep(1)
-                            finally:
-                                f.close()
-                        except IOError:
-                            time.sleep(1)
-                            pass
-                    else:
-                        break
                 except OSError, e:
-                    # File not present
-                    if e.errno == 2:
-                        time.sleep(1)
-                    else:
+                    # If anything except file not present, throw an error
+                    if e.errno != 2:
                         elapsed = datetime.datetime.now() - start
                         module.fail_json(msg="Failed to stat %s, %s" % (path, e.strerror), elapsed=elapsed.seconds)
+                    # file doesn't exist yet, so continue
+                else:
+                    # File exists.  Are there additional things to check?
+                    if not compiled_search_re:
+                        # nope, succeed!
+                        break
+                    try:
+                        f = open(path)
+                        try:
+                            if re.search(compiled_search_re, f.read()):
+                                # String found, success!
+                                break
+                        finally:
+                            f.close()
+                    except IOError:
+                        pass
             elif port:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(connect_timeout)
+                alt_connect_timeout = math.ceil(_timedelta_total_seconds(end - datetime.datetime.now()))
                 try:
-                    s.connect( (host, port) )
-                    if search_regex:
+                    s = _create_connection((host, port), min(connect_timeout, alt_connect_timeout))
+                except:
+                    # Failed to connect by connect_timeout. wait and try again
+                    pass
+                else:
+                    # Connected -- are there additional conditions?
+                    if compiled_search_re:
                         data = ''
                         matched = False
-                        while 1:
-                            data += s.recv(1024)
-                            if not data:
+                        while datetime.datetime.now() < end:
+                            max_timeout = math.ceil(_timedelta_total_seconds(end - datetime.datetime.now()))
+                            (readable, w, e) = select.select([s], [], [], max_timeout)
+                            if not readable:
+                                # No new data.  Probably means our timeout
+                                # expired
+                                continue
+                            response = s.recv(1024)
+                            if not response:
+                                # Server shutdown
                                 break
-                            elif re.search(search_regex, data, re.MULTILINE):
+                            data += response
+                            if re.search(compiled_search_re, data):
                                 matched = True
                                 break
+
+                        # Shutdown the client socket
+                        s.shutdown(socket.SHUT_RDWR)
+                        s.close()
                         if matched:
-                            s.shutdown(socket.SHUT_RDWR)
-                            s.close()
+                            # Found our string, success!
                             break
                     else:
+                        # Connection established, success!
                         s.shutdown(socket.SHUT_RDWR)
                         s.close()
                         break
-                except:
-                    time.sleep(1)
-                    pass
-            else:
-                time.sleep(1)
-        else:
+
+            # Conditions not yet met, wait and try again
+            time.sleep(1)
+
+        else:   # while-else
+            # Timeout expired
             elapsed = datetime.datetime.now() - start
             if port:
                 if search_regex:
@@ -470,4 +533,5 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()

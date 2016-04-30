@@ -19,14 +19,14 @@
 
 DOCUMENTATION = """
 module: consul_kv
-short_description: "manipulate entries in the key/value store of a consul
-  cluster. See http://www.consul.io/docs/agent/http.html#kv for more details."
+short_description: Manipulate entries in the key/value store of a consul cluster.
 description:
-  - allows the addition, modification and deletion of key/value entries in a
+  - Allows the addition, modification and deletion of key/value entries in a
     consul cluster via the agent. The entire contents of the record, including
-    the indices, flags and session are returned as 'value'. If the key
-    represents a prefix then Note that when a value is removed, the existing
+    the indices, flags and session are returned as 'value'.
+  - If the key represents a prefix then Note that when a value is removed, the existing
     value if any is returned as part of the results.
+  - "See http://www.consul.io/docs/agent/http.html#kv for more details."
 requirements:
   - "python >= 2.6"
   - python-consul
@@ -99,6 +99,18 @@ options:
           - the port on which the consul agent is running
         required: false
         default: 8500
+    scheme:
+        description:
+          - the protocol scheme on which the consul agent is running
+        required: false
+        default: http
+        version_added: "2.1"
+    validate_certs:
+        description:
+          - whether to verify the tls certificate of the consul agent
+        required: false
+        default: True
+        version_added: "2.1"
 """
 
 
@@ -121,12 +133,6 @@ EXAMPLES = '''
 '''
 
 import sys
-import urllib2
-
-try:
-    import json
-except ImportError:
-    import simplejson as json
 
 try:
     import consul
@@ -224,6 +230,8 @@ def remove_value(module):
 def get_consul_api(module, token=None):
     return consul.Consul(host=module.params.get('host'),
                          port=module.params.get('port'),
+                         scheme=module.params.get('scheme'),
+                         validate_certs=module.params.get('validate_certs'),
                          token=module.params.get('token'))
 
 def test_dependencies(module):
@@ -238,11 +246,13 @@ def main():
         flags=dict(required=False),
         key=dict(required=True),
         host=dict(default='localhost'),
+        scheme=dict(required=False, default='http'),
+        validate_certs=dict(required=False, default=True),
         port=dict(default=8500, type='int'),
         recurse=dict(required=False, type='bool'),
         retrieve=dict(required=False, default=True),
         state=dict(default='present', choices=['present', 'absent']),
-        token=dict(required=False, default='anonymous'),
+        token=dict(required=False, default='anonymous', no_log=True),
         value=dict(required=False)
     )
 
@@ -261,4 +271,5 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()

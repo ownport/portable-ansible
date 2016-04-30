@@ -43,13 +43,13 @@ options:
      required: false
    floating_ip_address:
      description:
-        - A floating IP address to attach or to detach. Required only if state
-          is absent. When state is present can be used to specify a IP address
+        - A floating IP address to attach or to detach. Required only if I(state)
+          is absent. When I(state) is present can be used to specify a IP address
           to attach.
      required: false
    reuse:
      description:
-        - When state is present, and floating_ip_address is not present,
+        - When I(state) is present, and I(floating_ip_address) is not present,
           this parameter can be used to specify whether we should try to reuse
           a floating IP address already allocated to the project.
      required: false
@@ -76,6 +76,13 @@ options:
      choices: [present, absent]
      required: false
      default: present
+   purge:
+     description:
+        - When I(state) is absent, indicates whether or not to delete the floating
+          IP completely, or only detach it from the server. Default is to detach only.
+     required: false
+     default: false
+     version_added: "2.1"
 requirements: ["shade"]
 '''
 
@@ -122,12 +129,13 @@ def main():
     argument_spec = openstack_full_argument_spec(
         server=dict(required=True),
         state=dict(default='present', choices=['absent', 'present']),
-        network=dict(required=False),
-        floating_ip_address=dict(required=False),
+        network=dict(required=False, default=None),
+        floating_ip_address=dict(required=False, default=None),
         reuse=dict(required=False, type='bool', default=False),
-        fixed_address=dict(required=False),
+        fixed_address=dict(required=False, default=None),
         wait=dict(required=False, type='bool', default=False),
         timeout=dict(required=False, type='int', default=60),
+        purge=dict(required=False, type='bool', default=False),
     )
 
     module_kwargs = openstack_module_kwargs()
@@ -144,6 +152,7 @@ def main():
     fixed_address = module.params['fixed_address']
     wait = module.params['wait']
     timeout = module.params['timeout']
+    purge = module.params['purge']
 
     cloud = shade.openstack_cloud(**module.params)
 
@@ -154,23 +163,13 @@ def main():
                 msg="server {0} not found".format(server_name_or_id))
 
         if state == 'present':
-            if floating_ip_address is None:
-                if reuse:
-                    f_ip = cloud.available_floating_ip(network=network)
-                else:
-                    f_ip = cloud.create_floating_ip(network=network)
-            else:
-                f_ip = _get_floating_ip(cloud, floating_ip_address)
-                if f_ip is None:
-                    module.fail_json(
-                        msg="floating IP {0} not found".format(
-                            floating_ip_address))
-
-            cloud.attach_ip_to_server(
-                server_id=server['id'], floating_ip_id=f_ip['id'],
-                fixed_address=fixed_address, wait=wait, timeout=timeout)
+            server = cloud.add_ips_to_server(
+                server=server, ips=floating_ip_address, ip_pool=network,
+                reuse=reuse, fixed_address=fixed_address, wait=wait,
+                timeout=timeout)
+            fip_address = cloud.get_server_public_ip(server)
             # Update the floating IP status
-            f_ip = cloud.get_floating_ip(id=f_ip['id'])
+            f_ip = _get_floating_ip(cloud, fip_address)
             module.exit_json(changed=True, floating_ip=f_ip)
 
         elif state == 'absent':
@@ -179,14 +178,21 @@ def main():
 
             f_ip = _get_floating_ip(cloud, floating_ip_address)
 
+            if not f_ip:
+                # Nothing to detach
+                module.exit_json(changed=False)
+
             cloud.detach_ip_from_server(
                 server_id=server['id'], floating_ip_id=f_ip['id'])
             # Update the floating IP status
             f_ip = cloud.get_floating_ip(id=f_ip['id'])
+            if purge:
+                cloud.delete_floating_ip(f_ip['id'])
+                module.exit_json(changed=True)
             module.exit_json(changed=True, floating_ip=f_ip)
 
     except shade.OpenStackCloudException as e:
-        module.fail_json(msg=e.message, extra_data=e.extra_data)
+        module.fail_json(msg=str(e), extra_data=e.extra_data)
 
 
 # this is magic, see lib/ansible/module_common.py

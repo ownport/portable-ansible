@@ -26,7 +26,9 @@ DOCUMENTATION = """
 ---
 module: replace
 author: "Evan Kaufman (@EvanK)"
-extends_documentation_fragment: files
+extends_documentation_fragment:
+    - files
+    - validate
 short_description: Replace all instances of a particular string in a
                    file using a back-referenced regular expression.
 description:
@@ -61,16 +63,17 @@ options:
     description:
       - Create a backup file including the timestamp information so you can
         get the original file back if you somehow clobbered it incorrectly.
-  validate:
-    required: false
-    description:
-      - validation to run before copying into place
-    required: false
-    default: None
   others:
     description:
       - All arguments accepted by the M(file) module also work here.
     required: false
+  follow:
+    required: false
+    default: "no"
+    choices: [ "yes", "no" ]
+    version_added: "1.9"
+    description:
+      - 'This flag indicates that filesystem links, if they exist, should be followed.'
 """
 
 EXAMPLES = r"""

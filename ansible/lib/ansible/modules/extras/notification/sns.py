@@ -24,7 +24,7 @@ short_description: Send Amazon Simple Notification Service (SNS) messages
 description:
     - The M(sns) module sends notifications to a topic on your Amazon SNS account
 version_added: 1.6
-author: "Michael J. Schultz (@mjschultz)" 
+author: "Michael J. Schultz (@mjschultz)"
 options:
   msg:
     description:
@@ -78,7 +78,6 @@ options:
     aliases: ['aws_region', 'ec2_region']
 
 requirements: [ "boto" ]
-author: Michael J. Schultz
 """
 
 EXAMPLES = """
@@ -107,9 +106,9 @@ try:
     import boto
     import boto.ec2
     import boto.sns
+    HAS_BOTO = True
 except ImportError:
-    print "failed=True msg='boto required for this module'"
-    sys.exit(1)
+    HAS_BOTO = False
 
 
 def arn_topic_lookup(connection, short_topic):
@@ -139,6 +138,9 @@ def main():
     )
 
     module = AnsibleModule(argument_spec=argument_spec)
+
+    if not HAS_BOTO:
+        module.fail_json(msg='boto required for this module')
 
     msg = module.params['msg']
     subject = module.params['subject']

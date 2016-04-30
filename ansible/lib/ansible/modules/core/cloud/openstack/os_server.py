@@ -76,25 +76,33 @@ options:
      default: None
    security_groups:
      description:
-        - The name of the security group to which the instance should be added
+        - Names of the security groups to which the instance should be
+          added. This may be a YAML list or a comma separated string.
+     required: false
+     default: None
+   network:
+     description:
+        - Name or ID of a network to attach this instance to. A simpler
+          version of the nics parameter, only one of network or nics should
+          be supplied.
      required: false
      default: None
    nics:
      description:
         - A list of networks to which the instance's interface should
-          be attached. Networks may be referenced by net-id or net-name.
+          be attached. Networks may be referenced by net-id/net-name/port-id
+          or port-name.
+        - 'Also this accepts a string containing a list of (net/port)-(id/name)
+          Eg: nics: "net-id=uuid-1,port-name=myport"
+          Only one of network or nics should be supplied.'
      required: false
      default: None
-   public_ip:
+   auto_ip:
      description:
         - Ensure instance has public ip however the cloud wants to do that
      required: false
      default: 'yes'
-   auto_floating_ip:
-     description:
-        - If the module should automatically assign a floating IP
-     required: false
-     default: 'yes'
+     aliases: ['auto_floating_ip', 'public_ip']
    floating_ips:
      description:
         - list of valid floating IPs that pre-exist to assign to this node
@@ -102,13 +110,14 @@ options:
      default: None
    floating_ip_pools:
      description:
-        - list of floating IP pools from which to choose a floating IP
+        - Name of floating IP pool from which to choose a floating IP
      required: false
      default: None
    meta:
      description:
-        - A list of key value pairs that should be provided as a metadata to
-          the new instance.
+        - 'A list of key value pairs that should be provided as a metadata to
+          the new instance or a string containing a list of key-value pairs.
+          Eg:  meta: "key1=value1,key2=value2"'
      required: false
      default: None
    wait:
@@ -132,15 +141,38 @@ options:
         - Opaque blob of data which is made available to the instance
      required: false
      default: None
-   root_volume:
+   boot_from_volume:
      description:
-        - Boot instance from a volume
+        - Should the instance boot from a persistent volume created based on
+          the image given. Mututally exclusive with boot_volume.
+     required: false
+     default: false
+   volume_size:
+     description:
+        - The size of the volume to create in GB if booting from volume based
+          on an image.
+   boot_volume:
+     description:
+        - Volume name or id to use as the volume to boot from. Implies
+          boot_from_volume. Mutually exclusive with image and boot_from_volume.
      required: false
      default: None
-     terminate_volume:
+     aliases: ['root_volume']
+   terminate_volume:
      description:
         - If true, delete volume when deleting instance (if booted from volume)
      default: false
+   volumes:
+     description:
+       - A list of preexisting volumes names or ids to attach to the instance
+     required: false
+     default: []
+   scheduler_hints:
+     description:
+        - Arbitrary key/value pairs to the scheduler for custom use
+     required: false
+     default: None
+     version_added: "2.1"
    state:
      description:
        - Should the resource be present or absent.
@@ -194,7 +226,7 @@ EXAMPLES = '''
       timeout: 200
       flavor: 101
       security_groups: default
-      auto_floating_ip: yes
+      auto_ip: yes
 
 # Creates a new instance in named cloud mordred availability zone az2
 # and assigns a pre-known floating IP
@@ -241,6 +273,90 @@ EXAMPLES = '''
       image: Ubuntu 14.04 LTS (Trusty Tahr) (PVHVM)
       flavor_ram: 4096
       flavor_include: Performance
+
+# Creates a new instance and attaches to multiple network
+- name: launch a compute instance
+  hosts: localhost
+  tasks:
+  - name: launch an instance with a string
+    os_server:
+      name: vm1
+      auth:
+         auth_url: https://region-b.geo-1.identity.hpcloudsvc.com:35357/v2.0/
+         username: admin
+         password: admin
+         project_name: admin
+       name: vm1
+       image: 4f905f38-e52a-43d2-b6ec-754a13ffb529
+       key_name: ansible_key
+       timeout: 200
+       flavor: 4
+       nics: "net-id=4cb08b20-62fe-11e5-9d70-feff819cdc9f,net-id=542f0430-62fe-11e5-9d70-feff819cdc9f..."
+
+# Creates a new instance and attaches to a network and passes metadata to
+# the instance
+- os_server:
+       state: present
+       auth:
+         auth_url: https://region-b.geo-1.identity.hpcloudsvc.com:35357/v2.0/
+         username: admin
+         password: admin
+         project_name: admin
+       name: vm1
+       image: 4f905f38-e52a-43d2-b6ec-754a13ffb529
+       key_name: ansible_key
+       timeout: 200
+       flavor: 4
+       nics:
+         - net-id: 34605f38-e52a-25d2-b6ec-754a13ffb723
+         - net-name: another_network
+       meta: "hostname=test1,group=uge_master"
+
+# Creates a new instance and attaches to a specific network
+- os_server:
+       state: present
+       auth:
+         auth_url: https://region-b.geo-1.identity.hpcloudsvc.com:35357/v2.0/
+         username: admin
+         password: admin
+         project_name: admin
+       name: vm1
+       image: 4f905f38-e52a-43d2-b6ec-754a13ffb529
+       key_name: ansible_key
+       timeout: 200
+       flavor: 4
+       network: another_network
+
+# Creates a new instance with 4G of RAM on a 75G Ubuntu Trusty volume
+- name: launch a compute instance
+  hosts: localhost
+  tasks:
+  - name: launch an instance
+    os_server:
+      name: vm1
+      state: present
+      cloud: mordred
+      region_name: ams01
+      image: Ubuntu Server 14.04
+      flavor_ram: 4096
+      boot_from_volume: True
+      volume_size: 75
+
+# Creates a new instance with 2 volumes attached
+- name: launch a compute instance
+  hosts: localhost
+  tasks:
+  - name: launch an instance
+    os_server:
+      name: vm1
+      state: present
+      cloud: mordred
+      region_name: ams01
+      image: Ubuntu Server 14.04
+      flavor_ram: 4096
+      volumes:
+      - photos
+      - music
 '''
 
 
@@ -250,9 +366,26 @@ def _exit_hostvars(module, cloud, server, changed=True):
         changed=changed, server=server, id=server.id, openstack=hostvars)
 
 
+def _parse_nics(nics):
+    for net in nics:
+        if type(net) == str:
+            for nic in net.split(','):
+                yield dict((nic.split('='),))
+        else:
+            yield net
+
 def _network_args(module, cloud):
     args = []
-    for net in module.params['nics']:
+    nics = module.params['nics']
+
+    if type(nics) != list:
+        module.fail_json(msg='The \'nics\' parameter must be a list.')
+
+    for net in _parse_nics(nics):
+        if type(net) != dict:
+            module.fail_json(
+                msg='Each entry in the \'nics\' parameter must be a dict.')
+
         if net.get('net-id'):
             args.append(net)
         elif net.get('net-name'):
@@ -262,6 +395,15 @@ def _network_args(module, cloud):
                     msg='Could not find network by net-name: %s' %
                     net['net-name'])
             args.append({'net-id': by_name['id']})
+        elif net.get('port-id'):
+            args.append(net)
+        elif net.get('port-name'):
+            by_name = cloud.get_port(net['port-name'])
+            if not by_name:
+                module.fail_json(
+                    msg='Could not find port by port-name: %s' %
+                    net['port-name'])
+            args.append({'port-id': by_name['id']})
     return args
 
 
@@ -281,16 +423,27 @@ def _create_server(module, cloud):
     flavor_include = module.params['flavor_include']
 
     image_id = None
-    if not module.params['root_volume']:
+    if not module.params['boot_volume']:
         image_id = cloud.get_image_id(
             module.params['image'], module.params['image_exclude'])
 
     if flavor:
         flavor_dict = cloud.get_flavor(flavor)
+        if not flavor_dict:
+            module.fail_json(msg="Could not find flavor %s" % flavor) 
     else:
         flavor_dict = cloud.get_flavor_by_ram(flavor_ram, flavor_include)
+        if not flavor_dict:
+            module.fail_json(msg="Could not find any matching flavor") 
 
     nics = _network_args(module, cloud)
+
+    if type(module.params['meta']) is str:
+        metas = {}
+        for kv_str in module.params['meta'].split(","):
+            k, v = kv_str.split("=")
+            metas[k] = v
+        module.params['meta'] = metas
 
     bootkwargs = dict(
         name=module.params['name'],
@@ -298,19 +451,22 @@ def _create_server(module, cloud):
         flavor=flavor_dict['id'],
         nics=nics,
         meta=module.params['meta'],
-        security_groups=module.params['security_groups'].split(','),
+        security_groups=module.params['security_groups'],
         userdata=module.params['userdata'],
         config_drive=module.params['config_drive'],
     )
-    for optional_param in ('region_name', 'key_name', 'availability_zone'):
+    for optional_param in (
+            'key_name', 'availability_zone', 'network',
+            'scheduler_hints', 'volume_size', 'volumes'):
         if module.params[optional_param]:
             bootkwargs[optional_param] = module.params[optional_param]
 
     server = cloud.create_server(
         ip_pool=module.params['floating_ip_pools'],
         ips=module.params['floating_ips'],
-        auto_ip=module.params['auto_floating_ip'],
-        root_volume=module.params['root_volume'],
+        auto_ip=module.params['auto_ip'],
+        boot_volume=module.params['boot_volume'],
+        boot_from_volume=module.params['boot_from_volume'],
         terminate_volume=module.params['terminate_volume'],
         wait=module.params['wait'], timeout=module.params['timeout'],
         **bootkwargs
@@ -328,20 +484,22 @@ def _delete_floating_ip_list(cloud, server, extra_ips):
 def _check_floating_ips(module, cloud, server):
     changed = False
 
-    auto_floating_ip = module.params['auto_floating_ip']
+    auto_ip = module.params['auto_ip']
     floating_ips = module.params['floating_ips']
     floating_ip_pools = module.params['floating_ip_pools']
 
-    if floating_ip_pools or floating_ips or auto_floating_ip:
+    if floating_ip_pools or floating_ips or auto_ip:
         ips = openstack_find_nova_addresses(server.addresses, 'floating')
         if not ips:
             # If we're configured to have a floating but we don't have one,
             # let's add one
             server = cloud.add_ips_to_server(
                 server,
-                auto_ip=auto_floating_ip,
+                auto_ip=auto_ip,
                 ips=floating_ips,
                 ip_pool=floating_ip_pools,
+                wait=module.params['wait'],
+                timeout=module.params['timeout'],
             )
             changed = True
         elif floating_ips:
@@ -352,7 +510,9 @@ def _check_floating_ips(module, cloud, server):
                 if ip not in ips:
                     missing_ips.append(ip)
             if missing_ips:
-                server = cloud.add_ip_list(server, missing_ips)
+                server = cloud.add_ip_list(server, missing_ips,
+                                           wait=module.params['wait'],
+                                           timeout=module.params['timeout'])
                 changed = True
             extra_ips = []
             for ip in ips:
@@ -368,7 +528,7 @@ def _get_server_state(module, cloud):
     state = module.params['state']
     server = cloud.get_server(module.params['name'])
     if server and state == 'present':
-        if server.status != 'ACTIVE':
+        if server.status not in ('ACTIVE', 'SHUTOFF', 'PAUSED', 'SUSPENDED'):
             module.fail_json(
                 msg="The instance is available but not Active state: "
                     + server.status)
@@ -391,25 +551,35 @@ def main():
         flavor_ram                      = dict(default=None, type='int'),
         flavor_include                  = dict(default=None),
         key_name                        = dict(default=None),
-        security_groups                 = dict(default='default'),
-        nics                            = dict(default=[]),
-        meta                            = dict(default=None),
-        userdata                        = dict(default=None),
+        security_groups                 = dict(default=['default'], type='list'),
+        network                         = dict(default=None),
+        nics                            = dict(default=[], type='list'),
+        meta                            = dict(default=None, type='raw'),
+        userdata                        = dict(default=None, aliases=['user_data']),
         config_drive                    = dict(default=False, type='bool'),
-        auto_floating_ip                = dict(default=True, type='bool'),
-        floating_ips                    = dict(default=None),
-        floating_ip_pools               = dict(default=None),
-        root_volume                     = dict(default=None),
+        auto_ip                         = dict(default=True, type='bool', aliases=['auto_floating_ip', 'public_ip']),
+        floating_ips                    = dict(default=None, type='list'),
+        floating_ip_pools               = dict(default=None, type='list'),
+        volume_size                     = dict(default=False, type='int'),
+        boot_from_volume                = dict(default=False, type='bool'),
+        boot_volume                     = dict(default=None, aliases=['root_volume']),
         terminate_volume                = dict(default=False, type='bool'),
+        volumes                         = dict(default=[], type='list'),
+        scheduler_hints                 = dict(default=None, type='dict'),
         state                           = dict(default='present', choices=['absent', 'present']),
     )
     module_kwargs = openstack_module_kwargs(
         mutually_exclusive=[
-            ['auto_floating_ip', 'floating_ips'],
-            ['auto_floating_ip', 'floating_ip_pools'],
+            ['auto_ip', 'floating_ips'],
+            ['auto_ip', 'floating_ip_pools'],
             ['floating_ips', 'floating_ip_pools'],
             ['flavor', 'flavor_ram'],
-            ['image', 'root_volume'],
+            ['image', 'boot_volume'],
+            ['boot_from_volume', 'boot_volume'],
+            ['nics', 'network'],
+        ],
+        required_if=[
+            ('boot_from_volume', True, ['volume_size', 'image']),
         ],
     )
     module = AnsibleModule(argument_spec, **module_kwargs)
@@ -419,14 +589,14 @@ def main():
 
     state = module.params['state']
     image = module.params['image']
-    root_volume = module.params['root_volume']
+    boot_volume = module.params['boot_volume']
     flavor = module.params['flavor']
     flavor_ram = module.params['flavor_ram']
 
     if state == 'present':
-        if not (image or root_volume):
+        if not (image or boot_volume):
             module.fail_json(
-                msg="Parameter 'image' or 'root_volume' is required "
+                msg="Parameter 'image' or 'boot_volume' is required "
                     "if state == 'present'"
             )
         if not flavor and not flavor_ram:
@@ -447,7 +617,7 @@ def main():
             _get_server_state(module, cloud)
             _delete_server(module, cloud)
     except shade.OpenStackCloudException as e:
-        module.fail_json(msg=e.message, extra_data=e.extra_data)
+        module.fail_json(msg=str(e), extra_data=e.extra_data)
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *

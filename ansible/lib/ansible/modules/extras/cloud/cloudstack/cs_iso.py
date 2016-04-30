@@ -21,7 +21,7 @@
 DOCUMENTATION = '''
 ---
 module: cs_iso
-short_description: Manages ISOs images on Apache CloudStack based clouds.
+short_description: Manages ISO images on Apache CloudStack based clouds.
 description:
     - Register and remove ISO images.
 version_added: '2.0'
@@ -140,12 +140,17 @@ EXAMPLES = '''
 
 RETURN = '''
 ---
+id:
+  description: UUID of the ISO.
+  returned: success
+  type: string
+  sample: a6f7a5fc-43f8-11e5-a151-feff819cdc9f
 name:
   description: Name of the ISO.
   returned: success
   type: string
   sample: Debian 7 64-bit
-displaytext:
+display_text:
   description: Text to be displayed of the ISO.
   returned: success
   type: string
@@ -205,7 +210,12 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackIso(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackIso, self).__init__(module)
+        self.returns = {
+            'checksum': 'checksum',
+            'status':   'status',
+            'isready':  'is_ready',
+        }
         self.iso = None
 
     def register_iso(self):
@@ -283,57 +293,29 @@ class AnsibleCloudStackIso(AnsibleCloudStack):
         return iso
 
 
-    def get_result(self, iso):
-        if iso:
-            if 'displaytext' in iso:
-                self.result['displaytext'] = iso['displaytext']
-            if 'name' in iso:
-                self.result['name'] = iso['name']
-            if 'zonename' in iso:
-                self.result['zone'] = iso['zonename']
-            if 'checksum' in iso:
-                self.result['checksum'] = iso['checksum']
-            if 'status' in iso:
-                self.result['status'] = iso['status']
-            if 'isready' in iso:
-                self.result['is_ready'] = iso['isready']
-            if 'created' in iso:
-                self.result['created'] = iso['created']
-            if 'project' in iso:
-                self.result['project'] = iso['project']
-            if 'domain' in iso:
-                self.result['domain'] = iso['domain']
-            if 'account' in iso:
-                self.result['account'] = iso['account']
-        return self.result
-
 
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        url = dict(default=None),
+        os_type = dict(default=None),
+        zone = dict(default=None),
+        iso_filter = dict(default='self', choices=[ 'featured', 'self', 'selfexecutable','sharedexecutable','executable', 'community' ]),
+        domain = dict(default=None),
+        account = dict(default=None),
+        project = dict(default=None),
+        checksum = dict(default=None),
+        is_ready = dict(type='bool', default=False),
+        bootable = dict(type='bool', default=True),
+        is_featured = dict(type='bool', default=False),
+        is_dynamically_scalable = dict(type='bool', default=False),
+        state = dict(choices=['present', 'absent'], default='present'),
+    ))
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            url = dict(default=None),
-            os_type = dict(default=None),
-            zone = dict(default=None),
-            iso_filter = dict(default='self', choices=[ 'featured', 'self', 'selfexecutable','sharedexecutable','executable', 'community' ]),
-            domain = dict(default=None),
-            account = dict(default=None),
-            project = dict(default=None),
-            checksum = dict(default=None),
-            is_ready = dict(choices=BOOLEANS, default=False),
-            bootable = dict(choices=BOOLEANS, default=True),
-            is_featured = dict(choices=BOOLEANS, default=False),
-            is_dynamically_scalable = dict(choices=BOOLEANS, default=False),
-            state = dict(choices=['present', 'absent'], default='present'),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-        ),
+        argument_spec=argument_spec,
+        required_together=cs_required_together(),
         supports_check_mode=True
     )
 
@@ -351,7 +333,7 @@ def main():
 
         result = acs_iso.get_result(iso)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

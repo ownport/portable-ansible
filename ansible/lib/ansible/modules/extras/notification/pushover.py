@@ -24,7 +24,7 @@ DOCUMENTATION = '''
 ---
 module: pushover
 version_added: "2.0"
-short_description: Send notifications via u(https://pushover.net)
+short_description: Send notifications via U(https://pushover.net)
 description:
    - Send notifications via pushover, to subscriber list of devices, and email
      addresses. Requires pushover app on devices.
@@ -34,18 +34,19 @@ notes:
 options:
   msg:
     description:
-      What message you wish to send.
+      - What message you wish to send.
     required: true
   app_token:
     description:
-      Pushover issued token identifying your pushover app.
+      - Pushover issued token identifying your pushover app.
     required: true
   user_key:
     description:
-      Pushover issued authentication key for your user.
+      - Pushover issued authentication key for your user.
     required: true
   pri:
-    description: Message priority (see u(https://pushover.net) for details.)
+    description:
+      - Message priority (see U(https://pushover.net) for details.)
     required: false
 
 author: "Jim Richardson (@weaselkeeper)"
@@ -57,24 +58,36 @@ EXAMPLES = '''
 '''
 
 import urllib
-import httplib
 
 
-class pushover(object):
+class Pushover(object):
     ''' Instantiates a pushover object, use it to send notifications '''
+    base_uri = 'https://api.pushover.net'
+    port = 443
 
-    def __init__(self):
-        self.host, self.port = 'api.pushover.net', 443
+    def __init__(self, module, user, token):
+        self.module = module
+        self.user = user
+        self.token = token
 
-    def run(self):
+    def run(self, priority, msg):
         ''' Do, whatever it is, we do. '''
+
+        url = '%s:%s/1/messages.json' % (self.base_uri, self.port)
+
         # parse config
-        conn = httplib.HTTPSConnection(self.host, self.port)
-        conn.request("POST", "/1/messages.json",
-                     urllib.urlencode(self.options),
-                     {"Content-type": "application/x-www-form-urlencoded"})
-        conn.getresponse()
-        return
+        options = dict(user=self.user,
+                token=self.token,
+                priority=priority,
+                message=msg)
+        data = urllib.urlencode(options)
+
+        headers = { "Content-type": "application/x-www-form-urlencoded"}
+        r, info = fetch_url(self.module, url, method='POST', data=data, headers=headers)
+        if info['status'] != 200:
+            raise Exception(info)
+
+        return r.read()
 
 
 def main():
@@ -82,25 +95,22 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             msg=dict(required=True),
-            app_token=dict(required=True),
-            user_key=dict(required=True),
-            pri=dict(required=False, default=0),
+            app_token=dict(required=True, no_log=True),
+            user_key=dict(required=True, no_log=True),
+            pri=dict(required=False, default='0', choices=['-2','-1','0','1','2']),
         ),
     )
 
-    msg_object = pushover()
-    msg_object.options = {}
-    msg_object.options['user'] = module.params['user_key']
-    msg_object.options['token'] = module.params['app_token']
-    msg_object.options['priority'] = module.params['pri']
-    msg_object.options['message'] = module.params['msg']
+    msg_object = Pushover(module, module.params['user_key'], module.params['app_token'])
     try:
-        msg_object.run()
+        response = msg_object.run(module.params['pri'], module.params['msg'])
     except:
         module.fail_json(msg='Unable to send msg via pushover')
 
-    module.exit_json(msg=msg, changed=False)
+    module.exit_json(msg='message sent successfully: %s' % response, changed=False)
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+from ansible.module_utils.urls import *
+if __name__ == '__main__':
+    main()

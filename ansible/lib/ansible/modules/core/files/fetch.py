@@ -1,5 +1,20 @@
 # this is a virtual module that is entirely implemented server side
 
+# This file is part of Ansible
+#
+# Ansible is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Ansible is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+
 DOCUMENTATION = '''
 ---
 module: fetch
@@ -53,6 +68,13 @@ requirements: []
 author: 
     - "Ansible Core Team"
     - "Michael DeHaan"
+notes:
+    - When running fetch with C(become), the M(slurp) module will also be
+      used to fetch the contents of the file for determining the remote
+      checksum. This effectively doubles the transfer size, and
+      depending on the file size can consume all available memory on the
+      remote or local hosts causing a C(MemoryError). Due to this it is
+      advisable to run this module without C(become) whenever possible.
 '''
 
 EXAMPLES = '''

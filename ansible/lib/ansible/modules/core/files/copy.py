@@ -19,7 +19,7 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import time
+import tempfile
 
 DOCUMENTATION = '''
 ---
@@ -27,7 +27,7 @@ module: copy
 version_added: "historical"
 short_description: Copies files to remote locations.
 description:
-     - The M(copy) module copies a file on the local box to remote locations. Use the M(fetch) module to copy files from remote locations to the local box.
+     - The M(copy) module copies a file on the local box to remote locations. Use the M(fetch) module to copy files from remote locations to the local box. If you need variable interpolation in copied files, use the M(template) module.
 options:
   src:
     description:
@@ -63,21 +63,13 @@ options:
   force:
     description:
       - the default is C(yes), which will replace the remote file when contents
-        are different than the source.  If C(no), the file will only be transferred
+        are different than the source. If C(no), the file will only be transferred
         if the destination does not exist.
     version_added: "1.1"
     required: false
     choices: [ "yes", "no" ]
     default: "yes"
     aliases: [ "thirsty" ]
-  validate:
-    description:
-      - The validation command to run before copying into place.  The path to the file to
-        validate is passed in via '%s' which must be present as in the visudo example below.
-        The command is passed securely so shell features like expansion and pipes won't work.
-    required: false
-    default: ""
-    version_added: "1.2"
   directory_mode:
     description:
       - When doing a recursive copy set the mode for the directories. If this is not set we will use the system
@@ -85,8 +77,25 @@ options:
         already existed.
     required: false
     version_added: "1.5"
-extends_documentation_fragment: files
-author: 
+  remote_src:
+    description:
+      - If False, it will search for src at originating/master machine, if True it will go to the remote/target machine for the src. Default is False.
+      - Currently remote_src does not support recursive copying.
+    choices: [ "True", "False" ]
+    required: false
+    default: "no"
+    version_added: "2.0"
+  follow:
+    required: false
+    default: "no"
+    choices: [ "yes", "no" ]
+    version_added: "1.8"
+    description:
+      - 'This flag indicates that filesystem links, if they exist, should be followed.'
+extends_documentation_fragment:
+    - files
+    - validate
+author:
     - "Ansible Core Team"
     - "Michael DeHaan"
 notes:
@@ -168,7 +177,7 @@ size:
     type: int
     sample: 1220
 state:
-    description: permissions of the target, after execution
+    description: state of the target, after execution
     returned: success
     type: string
     sample: "file"
@@ -213,7 +222,8 @@ def main():
             backup            = dict(default=False, type='bool'),
             force             = dict(default=True, aliases=['thirsty'], type='bool'),
             validate          = dict(required=False, type='str'),
-            directory_mode    = dict(required=False)
+            directory_mode    = dict(required=False),
+            remote_src        = dict(required=False, type='bool'),
         ),
         add_file_common_args=True,
         supports_check_mode=True,
@@ -226,11 +236,15 @@ def main():
     original_basename = module.params.get('original_basename',None)
     validate = module.params.get('validate',None)
     follow = module.params['follow']
+    mode   = module.params['mode']
+    remote_src = module.params['remote_src']
 
     if not os.path.exists(src):
-        module.fail_json(msg="Source %s failed to transfer" % (src))
+        module.fail_json(msg="Source %s not found" % (src))
     if not os.access(src, os.R_OK):
         module.fail_json(msg="Source %s not readable" % (src))
+    if os.path.isdir(src):
+        module.fail_json(msg="Remote copy does not support recursive copy of directory: %s" % (src))
 
     checksum_src = module.sha1(src)
     checksum_dest = None
@@ -275,7 +289,7 @@ def main():
                 # os.path.exists() can return false in some
                 # circumstances where the directory does not have
                 # the execute bit for the current user set, in
-                # which case the stat() call will raise an OSError 
+                # which case the stat() call will raise an OSError
                 os.stat(os.path.dirname(dest))
             except OSError, e:
                 if "permission denied" in str(e).lower():
@@ -295,14 +309,24 @@ def main():
                 os.unlink(dest)
                 open(dest, 'w').close()
             if validate:
+                # if we have a mode, make sure we set it on the temporary
+                # file source as some validations may require it
+                # FIXME: should we do the same for owner/group here too?
+                if mode is not None:
+                    module.set_mode_if_different(src, mode, False)
                 if "%s" not in validate:
                     module.fail_json(msg="validate must contain %%s: %s" % (validate))
                 (rc,out,err) = module.run_command(validate % src)
                 if rc != 0:
-                    module.fail_json(msg="failed to validate: rc:%s error:%s" % (rc,err))
-            module.atomic_move(src, dest)
+                    module.fail_json(msg="failed to validate", exit_status=rc, stdout=out, stderr=err)
+            if remote_src:
+                _, tmpdest = tempfile.mkstemp(dir=os.path.dirname(dest))
+                shutil.copy2(src, tmpdest)
+                module.atomic_move(tmpdest, dest)
+            else:
+                module.atomic_move(src, dest)
         except IOError:
-            module.fail_json(msg="failed to copy: %s to %s" % (src, dest))
+            module.fail_json(msg="failed to copy: %s to %s" % (src, dest), traceback=traceback.format_exc())
         changed = True
     else:
         changed = False

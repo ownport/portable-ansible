@@ -71,6 +71,7 @@ options:
   start_on_create:
     choices: [ 'yes', 'no']
     required: false
+    default: 'yes'
     description:
       - Controls whether the volume is started after creation or not, defaults to yes
   rebalance:
@@ -249,8 +250,8 @@ def wait_for_peer(host):
 
 def probe(host, myhostname):
     global module
-    run_gluster([ 'peer', 'probe', host ])
-    if not wait_for_peer(host):
+    out = run_gluster([ 'peer', 'probe', host ])
+    if not out.find('localhost') and not wait_for_peer(host):
         module.fail_json(msg='failed to probe peer %s on %s' % (host, myhostname))
     changed = True
 
@@ -258,9 +259,7 @@ def probe_all_peers(hosts, peers, myhostname):
     for host in hosts:
         host = host.strip() # Clean up any extra space for exact comparison
         if host not in peers:
-            # dont probe ourselves
-            if myhostname != host:
-                probe(host, myhostname)
+            probe(host, myhostname)
 
 def create_volume(name, stripe, replica, transport, hosts, bricks, force):
     args = [ 'volume', 'create' ]
@@ -289,8 +288,9 @@ def stop_volume(name):
 def set_volume_option(name, option, parameter):
     run_gluster([ 'volume', 'set', name, option, parameter ])
 
-def add_brick(name, brick, force):
-    args = [ 'volume', 'add-brick', name, brick ]
+def add_bricks(name, new_bricks, force):
+    args = [ 'volume', 'add-brick', name ]
+    args.extend(new_bricks)
     if force:
         args.append('force')
     run_gluster(args)
@@ -350,8 +350,11 @@ def main():
 
     # Clean up if last element is empty. Consider that yml can look like this:
     #   cluster="{% for host in groups['glusterfs'] %}{{ hostvars[host]['private_ip'] }},{% endfor %}"
-    if cluster != None and cluster[-1] == '':
+    if cluster != None and len(cluster) > 1 and cluster[-1] == '':
         cluster = cluster[0:-1]
+
+    if cluster == None or cluster[0] == '':
+        cluster = [myhostname]
 
     if brick_paths != None and "," in brick_paths:
         brick_paths = brick_paths.split(",")
@@ -408,8 +411,8 @@ def main():
                 if brick not in all_bricks:
                     removed_bricks.append(brick)
 
-            for brick in new_bricks:
-                add_brick(volume_name, brick, force)
+            if new_bricks:
+                add_bricks(volume_name, new_bricks, force)
                 changed = True
 
             # handle quotas
@@ -430,7 +433,7 @@ def main():
         else:
             module.fail_json(msg='failed to create volume %s' % volume_name)
 
-    if volume_name not in volumes:
+    if action != 'delete' and volume_name not in volumes:
         module.fail_json(msg='volume not found %s' % volume_name)
 
     if action == 'started':

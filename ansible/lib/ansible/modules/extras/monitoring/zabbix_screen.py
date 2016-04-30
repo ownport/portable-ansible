@@ -27,7 +27,7 @@ short_description: Zabbix screen creates/updates/deletes
 description:
     - This module allows you to create, modify and delete Zabbix screens and associated graph data.
 version_added: "2.0"
-author: 
+author:
     - "(@cove)"
     - "Tony Minfei Ding"
     - "Harrison Gu (@harrisongu)"
@@ -48,11 +48,23 @@ options:
         description:
             - Zabbix user password.
         required: true
+    http_login_user:
+        description:
+            - Basic Auth login
+        required: false
+        default: None
+        version_added: "2.1"
+    http_login_password:
+        description:
+            - Basic Auth password
+        required: false
+        default: None
+        version_added: "2.1"
     timeout:
         description:
             - The timeout of API request (seconds).
         default: 10
-    zabbix_screens:
+    screens:
         description:
             - List of screens to be created/updated/deleted(see example).
             - If the screen(s) already been added, the screen(s) name won't be updated.
@@ -142,8 +154,8 @@ except ImportError:
 class ZabbixAPIExtends(ZabbixAPI):
     screenitem = None
 
-    def __init__(self, server, timeout, **kwargs):
-        ZabbixAPI.__init__(self, server, timeout=timeout)
+    def __init__(self, server, timeout, user, passwd, **kwargs):
+        ZabbixAPI.__init__(self, server, timeout=timeout, user=user, passwd=passwd)
         self.screenitem = ZabbixAPISubClass(self, dict({"prefix": "screenitem"}, **kwargs))
 
 
@@ -315,11 +327,13 @@ class Screen(object):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            server_url=dict(required=True, aliases=['url']),
-            login_user=dict(required=True),
-            login_password=dict(required=True, no_log=True),
+            server_url=dict(type='str', required=True, aliases=['url']),
+            login_user=dict(type='str', required=True),
+            login_password=dict(type='str', required=True, no_log=True),
+            http_login_user=dict(type='str', required=False, default=None),
+            http_login_password=dict(type='str', required=False, default=None, no_log=True),
             timeout=dict(type='int', default=10),
-            screens=dict(type='dict', required=True)
+            screens=dict(type='list', required=True)
         ),
         supports_check_mode=True
     )
@@ -330,13 +344,15 @@ def main():
     server_url = module.params['server_url']
     login_user = module.params['login_user']
     login_password = module.params['login_password']
+    http_login_user = module.params['http_login_user']
+    http_login_password = module.params['http_login_password']
     timeout = module.params['timeout']
     screens = module.params['screens']
 
     zbx = None
     # login to zabbix
     try:
-        zbx = ZabbixAPIExtends(server_url, timeout=timeout)
+        zbx = ZabbixAPIExtends(server_url, timeout=timeout, user=http_login_user, passwd=http_login_password)
         zbx.login(login_user, login_password)
     except Exception, e:
         module.fail_json(msg="Failed to connect to Zabbix server: %s" % e)

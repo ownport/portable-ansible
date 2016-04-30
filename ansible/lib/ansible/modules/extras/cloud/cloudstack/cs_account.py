@@ -21,7 +21,7 @@
 DOCUMENTATION = '''
 ---
 module: cs_account
-short_description: Manages account on Apache CloudStack based clouds.
+short_description: Manages accounts on Apache CloudStack based clouds.
 description:
     - Create, disable, lock, enable and remove accounts.
 version_added: '2.0'
@@ -85,9 +85,10 @@ options:
   state:
     description:
       - State of the account.
+      - C(unlocked) is an alias for C(enabled).
     required: false
     default: 'present'
-    choices: [ 'present', 'absent', 'enabled', 'disabled', 'locked' ]
+    choices: [ 'present', 'absent', 'enabled', 'disabled', 'locked', 'unlocked' ]
   poll_async:
     description:
       - Poll async jobs until job has finished.
@@ -139,6 +140,11 @@ local_action:
 
 RETURN = '''
 ---
+id:
+  description: UUID of the account.
+  returned: success
+  type: string
+  sample: 87b1e0ce-4e01-11e4-bb66-0050569e64b8
 name:
   description: Name of the account.
   returned: success
@@ -149,7 +155,7 @@ account_type:
   returned: success
   type: string
   sample: user
-account_state:
+state:
   description: State of the account.
   returned: success
   type: string
@@ -179,7 +185,10 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackAccount(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackAccount, self).__init__(module)
+        self.returns = {
+            'networkdomain': 'network_domain',
+        }
         self.account = None
         self.account_types = {
             'user':         0,
@@ -212,7 +221,7 @@ class AnsibleCloudStackAccount(AnsibleCloudStack):
     def enable_account(self):
         account = self.get_account()
         if not account:
-            self.module.fail_json(msg="Failed: account not present")
+            account = self.present_account()
 
         if account['state'].lower() != 'enabled':
             self.result['changed'] = True
@@ -239,7 +248,7 @@ class AnsibleCloudStackAccount(AnsibleCloudStack):
     def lock_or_disable_account(self, lock=False):
         account = self.get_account()
         if not account:
-            self.module.fail_json(msg="Failed: account not present")
+            account = self.present_account()
 
         # we need to enable the account to lock it.
         if lock and account['state'].lower() == 'disabled':
@@ -268,21 +277,16 @@ class AnsibleCloudStackAccount(AnsibleCloudStack):
     def present_account(self):
         missing_params = []
 
-        if not self.module.params.get('email'):
-            missing_params.append('email')
-
-        if not self.module.params.get('username'):
-            missing_params.append('username')
-
-        if not self.module.params.get('password'):
-            missing_params.append('password')
-
-        if not self.module.params.get('first_name'):
-            missing_params.append('first_name')
-
-        if not self.module.params.get('last_name'):
-            missing_params.append('last_name')
-
+        missing_params = []
+        for required_params in [
+            'email',
+            'username',
+            'password',
+            'first_name',
+            'last_name',
+        ]:
+            if not self.module.params.get(required_params):
+                missing_params.append(required_params)
         if missing_params:
             self.module.fail_json(msg="missing required arguments: %s" % ','.join(missing_params))
 
@@ -318,7 +322,7 @@ class AnsibleCloudStackAccount(AnsibleCloudStack):
             if not self.module.check_mode:
                 res = self.cs.deleteAccount(id=account['id'])
 
-                if 'errortext' in account:
+                if 'errortext' in res:
                     self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
 
                 poll_async = self.module.params.get('poll_async')
@@ -328,47 +332,36 @@ class AnsibleCloudStackAccount(AnsibleCloudStack):
 
 
     def get_result(self, account):
+        super(AnsibleCloudStackAccount, self).get_result(account)
         if account:
-            if 'name' in account:
-                self.result['name'] = account['name']
             if 'accounttype' in account:
                 for key,value in self.account_types.items():
                     if value == account['accounttype']:
                         self.result['account_type'] = key
                         break
-            if 'state' in account:
-                self.result['account_state'] = account['state']
-            if 'domain' in account:
-                self.result['domain'] = account['domain']
-            if 'networkdomain' in account:
-                self.result['network_domain'] = account['networkdomain']
         return self.result
 
 
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        state = dict(choices=['present', 'absent', 'enabled', 'disabled', 'locked', 'unlocked'], default='present'),
+        account_type = dict(choices=['user', 'root_admin', 'domain_admin'], default='user'),
+        network_domain = dict(default=None),
+        domain = dict(default='ROOT'),
+        email = dict(default=None),
+        first_name = dict(default=None),
+        last_name = dict(default=None),
+        username = dict(default=None),
+        password = dict(default=None, no_log=True),
+        timezone = dict(default=None),
+        poll_async = dict(type='bool', default=True),
+    ))
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            state = dict(choices=['present', 'absent', 'enabled', 'disabled', 'locked' ], default='present'),
-            account_type = dict(choices=['user', 'root_admin', 'domain_admin'], default='user'),
-            network_domain = dict(default=None),
-            domain = dict(default='ROOT'),
-            email = dict(default=None),
-            first_name = dict(default=None),
-            last_name = dict(default=None),
-            username = dict(default=None),
-            password = dict(default=None),
-            timezone = dict(default=None),
-            poll_async = dict(choices=BOOLEANS, default=True),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-        ),
+        argument_spec=argument_spec,
+        required_together=cs_required_together(),
         supports_check_mode=True
     )
 
@@ -383,7 +376,7 @@ def main():
         if state in ['absent']:
             account = acs_acc.absent_account()
 
-        elif state in ['enabled']:
+        elif state in ['enabled', 'unlocked']:
             account = acs_acc.enable_account()
 
         elif state in ['disabled']:
@@ -397,7 +390,7 @@ def main():
 
         result = acs_acc.get_result(account)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

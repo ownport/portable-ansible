@@ -31,7 +31,9 @@ import re
 DOCUMENTATION = '''
 ---
 module: zypper
-author: "Patrick Callahan (@dirtyharrycallahan)"
+author:
+    - "Patrick Callahan (@dirtyharrycallahan)"
+    - "Alexander Gubin (@alxgu)"
 version_added: "1.2"
 short_description: Manage packages on SUSE and openSUSE
 description:
@@ -39,7 +41,7 @@ description:
 options:
     name:
         description:
-        - package name or package specifier wth version C(name) or C(name-1.0).
+        - package name or package specifier with version C(name) or C(name-1.0). You can also pass a url or a local path to a rpm file.
         required: true
         aliases: [ 'pkg' ]
     state:
@@ -77,7 +79,6 @@ options:
 notes: []
 # informational: requirements for nodes
 requirements: [ zypper, rpm ]
-author: Patrick Callahan
 '''
 
 EXAMPLES = '''
@@ -89,6 +90,12 @@ EXAMPLES = '''
 
 # Remove the "nmap" package
 - zypper: name=nmap state=absent
+
+# Install the nginx rpm from a remote repo
+- zypper: name=http://nginx.org/packages/sles/12/x86_64/RPMS/nginx-1.8.0-1.sles12.ngx.x86_64.rpm state=present
+
+# Install local rpm file
+- zypper: name=/tmp/fancy-software.rpm state=present
 '''
 
 # Function used for getting zypper version
@@ -129,6 +136,20 @@ def get_current_version(m, packages):
 
 # Function used to find out if a package is currently installed.
 def get_package_state(m, packages):
+    for i in range(0, len(packages)):
+        # Check state of a local rpm-file
+        if ".rpm" in packages[i]:
+            # Check if rpm file is available
+            package = packages[i]
+            if not os.path.isfile(package) and not '://' in package:
+                stderr = "No Package file matching '%s' found on system" % package
+                m.fail_json(msg=stderr, rc=1)
+            # Get packagename from rpm file
+            cmd = ['/bin/rpm', '--query', '--qf', '%{NAME}', '--package']
+            cmd.append(package)
+            rc, stdout, stderr = m.run_command(cmd, check_rc=False)
+            packages[i] = stdout
+
     cmd = ['/bin/rpm', '--query', '--qf', 'package %{NAME} is installed\n']
     cmd.extend(packages)
 
@@ -139,7 +160,7 @@ def get_package_state(m, packages):
     for stdoutline in stdout.splitlines():
         match = rpmoutput_re.match(stdoutline)
         if match == None:
-            return None
+            continue
         package = match.group(1)
         result = match.group(2)
         if result == 'is installed':
@@ -147,18 +168,13 @@ def get_package_state(m, packages):
         else:
             installed_state[package] = False
 
-    for package in packages:
-        if package not in installed_state:
-            print package + ' was not returned by rpm \n'
-            return None
-
     return installed_state
 
 # Function used to make sure a package is present.
 def package_present(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper):
     packages = []
     for package in name:
-        if installed_state[package] is False:
+        if package not in installed_state or installed_state[package] is False:
             packages.append(package)
     if len(packages) != 0:
         cmd = ['/usr/bin/zypper', '--non-interactive']
@@ -190,6 +206,11 @@ def package_latest(m, name, installed_state, package_type, disable_gpg_check, di
     # first of all, make sure all the packages are installed
     (rc, stdout, stderr, changed) = package_present(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper)
 
+    # return if an error occured while installation
+    # otherwise error messages will be lost and user doesn`t see any error
+    if rc:
+        return (rc, stdout, stderr, changed)
+
     # if we've already made a change, we don't have to check whether a version changed
     if not changed:
         pre_upgrade_versions = get_current_version(m, name)
@@ -219,7 +240,7 @@ def package_latest(m, name, installed_state, package_type, disable_gpg_check, di
 def package_absent(m, name, installed_state, package_type, old_zypper):
     packages = []
     for package in name:
-        if installed_state[package] is True:
+        if package not in installed_state or installed_state[package] is True:
             packages.append(package)
     if len(packages) != 0:
         cmd = ['/usr/bin/zypper', '--non-interactive', 'remove', '-t', package_type]
@@ -289,11 +310,12 @@ def main():
 
     if rc != 0:
         if stderr:
-            module.fail_json(msg=stderr)
+            module.fail_json(msg=stderr, rc=rc)
         else:
-            module.fail_json(msg=stdout)
+            module.fail_json(msg=stdout, rc=rc)
 
     result['changed'] = changed
+    result['rc'] = rc
 
     module.exit_json(**result)
 

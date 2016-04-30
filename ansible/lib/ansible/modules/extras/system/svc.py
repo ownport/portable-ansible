@@ -22,7 +22,7 @@ DOCUMENTATION = '''
 ---
 module: svc
 author: "Brian Coca (@bcoca)"
-version_added:
+version_added: "1.9"
 short_description:  Manage daemontools services.
 description:
     - Controls daemontools services on remote hosts using the svc utility.
@@ -38,7 +38,7 @@ options:
             - C(Started)/C(stopped) are idempotent actions that will not run
               commands unless necessary.  C(restarted) will always bounce the
               svc (svc -t) and C(killed) will always bounce the svc (svc -k).
-              C(reloaded) will send a sigusr1 (svc -u).
+              C(reloaded) will send a sigusr1 (svc -1).
               C(once) will run a normally downed svc once (svc -o), not really
               an idempotent operation.
     downed:
@@ -240,14 +240,16 @@ def main():
         argument_spec = dict(
             name = dict(required=True),
             state = dict(choices=['started', 'stopped', 'restarted', 'killed', 'reloaded', 'once']),
-            enabled = dict(required=False, type='bool', choices=BOOLEANS),
-            downed = dict(required=False, type='bool', choices=BOOLEANS),
+            enabled = dict(required=False, type='bool'),
+            downed = dict(required=False, type='bool'),
             dist = dict(required=False, default='daemontools'),
             service_dir = dict(required=False, default='/service'),
             service_src = dict(required=False, default='/etc/service'),
         ),
         supports_check_mode=True,
     )
+
+    module.run_command_environ_update = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C', LC_CTYPE='C')
 
     state = module.params['state']
     enabled = module.params['enabled']

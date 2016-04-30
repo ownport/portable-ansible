@@ -46,15 +46,15 @@ options:
     required: true
   min_size:
     description:
-      - Minimum number of instances in group
+      - Minimum number of instances in group, if unspecified then the current group value will be used.
     required: false
   max_size:
     description:
-      - Maximum number of instances in group
+      - Maximum number of instances in group, if unspecified then the current group value will be used.
     required: false
   desired_capacity:
     description:
-      - Desired number of instances in group
+      - Desired number of instances in group, if unspecified then the current group value will be used.
     required: false
   replace_all_instances:
     description:
@@ -67,7 +67,7 @@ options:
       - Number of instances you'd like to replace at a time.  Used with replace_all_instances.
     required: false
     version_added: "1.8"
-    default: 1  
+    default: 1
   replace_instances:
     description:
       - List of instance_ids belonging to the named ASG that you would like to terminate and be replaced with instances matching the current launch configuration.
@@ -80,11 +80,6 @@ options:
     required: false
     version_added: "1.8"
     default: True
-  region:
-    description:
-      - The AWS region to use. If not specified then the value of the EC2_REGION environment variable, if any, is used.
-    required: false
-    aliases: ['aws_region', 'ec2_region']
   vpc_zone_identifier:
     description:
       - List of VPC subnets to use
@@ -111,7 +106,7 @@ options:
     choices: ['EC2', 'ELB']
   default_cooldown:
     description:
-    The number of seconds after a scaling activity completes before another can begin.
+      - The number of seconds after a scaling activity completes before another can begin.
     required: false
     default: 300 seconds
     version_added: "2.0"
@@ -126,7 +121,17 @@ options:
     version_added: "1.9"
     default: yes
     required: False
-extends_documentation_fragment: aws
+  termination_policies:
+    description:
+        - An ordered list of criteria used for selecting instances to be removed from the Auto Scaling group when reducing capacity.
+        - For 'Default', when used to create a new autoscaling group, the "Default" value is used. When used to change an existent autoscaling group, the current termination policies are mantained
+    required: false
+    default: Default
+    choices: ['OldestInstance', 'NewestInstance', 'OldestLaunchConfiguration', 'ClosestToNextInstanceHour', 'Default']
+    version_added: "2.0"
+extends_documentation_fragment:
+    - aws
+    - ec2
 """
 
 EXAMPLES = '''
@@ -147,9 +152,9 @@ EXAMPLES = '''
 
 # Rolling ASG Updates
 
-Below is an example of how to assign a new launch config to an ASG and terminate old instances.  
+Below is an example of how to assign a new launch config to an ASG and terminate old instances.
 
-All instances in "myasg" that do not have the launch configuration named "my_new_lc" will be terminated in 
+All instances in "myasg" that do not have the launch configuration named "my_new_lc" will be terminated in
 a rolling fashion with instances using the current launch configuration, "my_new_lc".
 
 This could also be considered a rolling deploy of a pre-baked AMI.
@@ -250,9 +255,10 @@ def get_properties(autoscaling_group):
     properties['viable_instances'] = 0
     properties['terminating_instances'] = 0
 
+    instance_facts = {}
+
     if autoscaling_group.instances:
         properties['instances'] = [i.instance_id for i in autoscaling_group.instances]
-        instance_facts = {}
         for i in autoscaling_group.instances:
             instance_facts[i.instance_id] = {'health_status': i.health_status,
                                             'lifecycle_state': i.lifecycle_state,
@@ -269,12 +275,11 @@ def get_properties(autoscaling_group):
                 properties['terminating_instances'] += 1
             if i.lifecycle_state == 'Pending':
                 properties['pending_instances'] += 1
-        properties['instance_facts'] = instance_facts
+    properties['instance_facts'] = instance_facts
     properties['load_balancers'] = autoscaling_group.load_balancers
 
     if getattr(autoscaling_group, "tags", None):
         properties['tags'] = dict((t.key, t.value) for t in autoscaling_group.tags)
-
 
     return properties
 
@@ -292,7 +297,6 @@ def elb_dreg(asg_connection, module, group_name, instance_id):
     else:
         return
 
-    exists = True
     for lb in as_group.load_balancers:
         elb_connection.deregister_instances(lb, instance_id)
         log.debug("De-registering {0} from ELB {1}".format(instance_id, lb))
@@ -309,10 +313,8 @@ def elb_dreg(asg_connection, module, group_name, instance_id):
         time.sleep(10)
 
     if wait_timeout <= time.time():
-    # waiting took too long
+        # waiting took too long
         module.fail_json(msg = "Waited too long for instance to deregister. {0}".format(time.asctime()))
-    
-
 
 
 def elb_healthy(asg_connection, elb_connection, module, group_name):
@@ -331,14 +333,13 @@ def elb_healthy(asg_connection, elb_connection, module, group_name):
         # but has not yet show up in the ELB
         try:
             lb_instances = elb_connection.describe_instance_health(lb, instances=instances)
-        except boto.exception.InvalidInstance, e:
+        except boto.exception.InvalidInstance:
             pass
         for i in lb_instances:
             if i.state == "InService":
                 healthy_instances.append(i.instance_id)
             log.debug("{0}: {1}".format(i.instance_id, i.state))
     return len(healthy_instances)
-
 
 
 def wait_for_elb(asg_connection, module, group_name):
@@ -364,7 +365,7 @@ def wait_for_elb(asg_connection, module, group_name):
             log.debug("ELB thinks {0} instances are healthy.".format(healthy_instances))
             time.sleep(10)
         if wait_timeout <= time.time():
-        # waiting took too long
+            # waiting took too long
             module.fail_json(msg = "Waited too long for ELB instances to be healthy. %s" % time.asctime())
         log.debug("Waiting complete.  ELB thinks {0} instances are healthy.".format(healthy_instances))
 
@@ -384,12 +385,13 @@ def create_autoscaling_group(connection, module):
     wait_for_instances = module.params.get('wait_for_instances')
     as_groups = connection.get_all_groups(names=[group_name])
     wait_timeout = module.params.get('wait_timeout')
+    termination_policies = module.params.get('termination_policies')
 
     if not vpc_zone_identifier and not availability_zones:
         region, ec2_url, aws_connect_params = get_aws_connection_info(module)
         try:
             ec2_connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError), e:
+        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError), e:
             module.fail_json(msg=str(e))
     elif vpc_zone_identifier:
         vpc_zone_identifier = ','.join(vpc_zone_identifier)
@@ -421,11 +423,12 @@ def create_autoscaling_group(connection, module):
                  tags=asg_tags,
                  health_check_period=health_check_period,
                  health_check_type=health_check_type,
-                 default_cooldown=default_cooldown)
+                 default_cooldown=default_cooldown,
+                 termination_policies=termination_policies)
 
         try:
             connection.create_auto_scaling_group(ag)
-            if wait_for_instances == True:
+            if wait_for_instances:
                 wait_for_new_inst(module, connection, group_name, wait_timeout, desired_capacity, 'viable_instances')
                 wait_for_elb(connection, module, group_name)
             as_group = connection.get_all_groups(names=[group_name])[0]
@@ -467,7 +470,7 @@ def create_autoscaling_group(connection, module):
             dead_tags = []
             for tag in as_group.tags:
                 have_tags[tag.key] = [tag.value, tag.propagate_at_launch]
-                if not tag.key in want_tags:
+                if tag.key not in want_tags:
                     changed = True
                     dead_tags.append(tag)
 
@@ -484,14 +487,13 @@ def create_autoscaling_group(connection, module):
             changed = True
             as_group.load_balancers = module.params.get('load_balancers')
 
-
         if changed:
             try:
                 as_group.update()
             except BotoServerError, e:
                 module.fail_json(msg=str(e))
 
-        if wait_for_instances == True:
+        if wait_for_instances:
             wait_for_new_inst(module, connection, group_name, wait_timeout, desired_capacity, 'viable_instances')
             wait_for_elb(connection, module, group_name)
         try:
@@ -517,7 +519,7 @@ def delete_autoscaling_group(connection, module):
             if tmp_groups:
                 tmp_group = tmp_groups[0]
                 if not tmp_group.instances:
-                   instances = False
+                    instances = False
             time.sleep(10)
 
         group.delete()
@@ -572,15 +574,22 @@ def replace(connection, module):
             changed = True
             return(changed, props)
 
-       #  we don't want to spin up extra instances if not necessary
+        #  we don't want to spin up extra instances if not necessary
         if num_new_inst_needed < batch_size:
-           log.debug("Overriding batch size to {0}".format(num_new_inst_needed))
-           batch_size = num_new_inst_needed
+            log.debug("Overriding batch size to {0}".format(num_new_inst_needed))
+            batch_size = num_new_inst_needed
 
     if not old_instances:
         changed = False
         return(changed, props)
-        
+
+    #check if min_size/max_size/desired capacity have been specified and if not use ASG values
+    if min_size is None:
+        min_size = as_group.min_size
+    if max_size is None:
+        max_size = as_group.max_size
+    if desired_capacity is None:
+        desired_capacity = as_group.desired_capacity
     # set temporary settings and wait for them to be reached
     # This should get overriden if the number of instances left is less than the batch size.
 
@@ -622,7 +631,7 @@ def get_instances_by_lc(props, lc_check, initial_instances):
                 new_instances.append(i)
             else:
                 old_instances.append(i)
-        
+
     else:
         log.debug("Comparing initial instances with current: {0}".format(initial_instances))
         for i in props['instances']:
@@ -644,10 +653,10 @@ def list_purgeable_instances(props, lc_check, replace_instances, initial_instanc
     # and they have a non-current launch config
     if lc_check:
         for i in instances:
-           if props['instance_facts'][i]['launch_config_name']  != props['launch_config_name']:
+            if props['instance_facts'][i]['launch_config_name']  != props['launch_config_name']:
                 instances_to_terminate.append(i)
     else:
-       for i in instances:
+        for i in instances:
             if i in initial_instances:
                 instances_to_terminate.append(i)
     return instances_to_terminate
@@ -661,7 +670,7 @@ def terminate_batch(connection, module, replace_instances, initial_instances, le
     lc_check = module.params.get('lc_check')
     decrement_capacity = False
     break_loop = False
-    
+
     as_group = connection.get_all_groups(names=[group_name])[0]
     props = get_properties(as_group)
     desired_size = as_group.min_size
@@ -705,7 +714,7 @@ def terminate_batch(connection, module, replace_instances, initial_instances, le
         elb_dreg(connection, module, group_name, instance_id)
         log.debug("terminating instance: {0}".format(instance_id))
         connection.terminate_instance(instance_id, decrement_capacity=decrement_capacity)
-    
+
     # we wait to make sure the machines we marked as Unhealthy are
     # no longer in the list
 
@@ -741,7 +750,7 @@ def wait_for_term_inst(connection, module, term_instances):
         # waiting took too long
         module.fail_json(msg = "Waited too long for old instances to terminate. %s" % time.asctime())
 
-    
+
 def wait_for_new_inst(module, connection, group_name, wait_timeout, desired_size, prop):
 
     # make sure we have the latest stats after that last loop.
@@ -783,12 +792,13 @@ def main():
             health_check_period=dict(type='int', default=300),
             health_check_type=dict(default='EC2', choices=['EC2', 'ELB']),
             default_cooldown=dict(type='int', default=300),
-            wait_for_instances=dict(type='bool', default=True)
+            wait_for_instances=dict(type='bool', default=True),
+            termination_policies=dict(type='list', default='Default')
         ),
     )
-    
+
     module = AnsibleModule(
-        argument_spec=argument_spec, 
+        argument_spec=argument_spec,
         mutually_exclusive = [['replace_all_instances', 'replace_instances']]
     )
 
@@ -810,13 +820,13 @@ def main():
     if state == 'present':
         create_changed, asg_properties=create_autoscaling_group(connection, module)
     elif state == 'absent':
-       changed = delete_autoscaling_group(connection, module)
-       module.exit_json( changed = changed )
+        changed = delete_autoscaling_group(connection, module)
+        module.exit_json( changed = changed )
     if replace_all_instances or replace_instances:
         replace_changed, asg_properties=replace(connection, module)
     if create_changed or replace_changed:
         changed = True
     module.exit_json( changed = changed, **asg_properties )
 
-
-main()
+if __name__ == '__main__':
+    main()

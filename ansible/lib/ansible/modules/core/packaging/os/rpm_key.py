@@ -61,9 +61,7 @@ EXAMPLES = '''
 - rpm_key: state=absent key=DEADB33F
 '''
 import re
-import syslog
 import os.path
-import urllib2
 import tempfile
 
 def is_pubkey(string):
@@ -74,7 +72,6 @@ def is_pubkey(string):
 class RpmKey:
 
     def __init__(self, module):
-        self.syslogging = False
         # If the key is a url, we need to check if it's present to be idempotent,
         # to do that, we need to check the keyid, which we can get from the armor.
         keyfile = None
@@ -117,18 +114,18 @@ class RpmKey:
 
     def fetch_key(self, url):
         """Downloads a key from url, returns a valid path to a gpg key"""
-        try:
-            rsp, info = fetch_url(self.module, url)
-            key = rsp.read()
-            if not is_pubkey(key):
-                self.module.fail_json(msg="Not a public key: %s" % url)
-            tmpfd, tmpname = tempfile.mkstemp()
-            tmpfile = os.fdopen(tmpfd, "w+b")
-            tmpfile.write(key)
-            tmpfile.close()
-            return tmpname
-        except urllib2.URLError, e:
-            self.module.fail_json(msg=str(e))
+        rsp, info = fetch_url(self.module, url)
+        if info['status'] != 200:
+            self.module.fail_json(msg="failed to fetch key at %s , error was: %s" % (url, info['msg']))
+
+        key = rsp.read()
+        if not is_pubkey(key):
+            self.module.fail_json(msg="Not a public key: %s" % url)
+        tmpfd, tmpname = tempfile.mkstemp()
+        tmpfile = os.fdopen(tmpfd, "w+b")
+        tmpfile.write(key)
+        tmpfile.close()
+        return tmpname
 
     def normalize_keyid(self, keyid):
         """Ensure a keyid doesn't have a leading 0x, has leading or trailing whitespace, and make sure is lowercase"""
@@ -141,7 +138,14 @@ class RpmKey:
             return ret
 
     def getkeyid(self, keyfile):
-        gpg = self.module.get_bin_path('gpg', True)
+
+        gpg = self.module.get_bin_path('gpg')
+        if not gpg:
+            gpg = self.module.get_bin_path('gpg2')
+
+        if not gpg:
+            self.json_fail(msg="rpm_key requires a command line gpg or gpg2, none found")
+
         stdout, stderr = self.execute_command([gpg, '--no-tty', '--batch', '--with-colons', '--fixed-list-mode', '--list-packets', keyfile])
         for line in stdout.splitlines():
             line = line.strip()
@@ -156,9 +160,6 @@ class RpmKey:
         return re.match('(0x)?[0-9a-f]{8}', keystr, flags=re.IGNORECASE)
 
     def execute_command(self, cmd):
-        if self.syslogging:
-            syslog.openlog('ansible-%s' % os.path.basename(__file__))
-            syslog.syslog(syslog.LOG_NOTICE, 'Command %s' % '|'.join(cmd))
         rc, stdout, stderr = self.module.run_command(cmd)
         if rc != 0:
             self.module.fail_json(msg=stderr)

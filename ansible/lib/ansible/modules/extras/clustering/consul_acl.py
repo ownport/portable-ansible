@@ -22,7 +22,7 @@ module: consul_acl
 short_description: "manipulate consul acl keys and rules"
 description:
  - allows the addition, modification and deletion of ACL keys and associated
-   rules in a consul cluster via the agent. For more details on using and 
+   rules in a consul cluster via the agent. For more details on using and
    configuring ACLs, see https://www.consul.io/docs/internals/acl.html.
 requirements:
   - "python >= 2.6"
@@ -57,7 +57,7 @@ options:
         required: false
     rules:
         description:
-          - an list of the rules that should be associated with a given key/token.
+          - an list of the rules that should be associated with a given token.
         required: false
     host:
         description:
@@ -69,6 +69,18 @@ options:
           - the port on which the consul agent is running
         required: false
         default: 8500
+    scheme:
+        description:
+          - the protocol scheme on which the consul agent is running
+        required: false
+        default: http
+        version_added: "2.1"
+    validate_certs:
+        description:
+          - whether to verify the tls certificate of the consul agent
+        required: false
+        default: True
+        version_added: "2.1"
 """
 
 EXAMPLES = '''
@@ -83,6 +95,19 @@ EXAMPLES = '''
           - key: 'private/foo'
             policy: deny
 
+    - name: create an acl with specific token with both key and serivce rules
+      consul_acl:
+        mgmt_token: 'some_management_acl'
+        name: 'Foo access'
+        token: 'some_client_token'
+        rules:
+          - key: 'foo'
+            policy: read
+          - service: ''
+            policy: write
+          - service: 'secret-'
+            policy: deny
+
     - name: remove a token
       consul_acl:
         mgmt_token: 'some_management_acl'
@@ -92,7 +117,6 @@ EXAMPLES = '''
 '''
 
 import sys
-import urllib2
 
 try:
     import consul
@@ -135,8 +159,6 @@ def update_acl(module):
         if token:
             existing_rules = load_rules_for_token(module, consul, token)
             supplied_rules = yml_to_rules(module, rules)
-            print existing_rules
-            print supplied_rules
             changed = not existing_rules == supplied_rules
             if changed:
                 y = supplied_rules.to_hcl()
@@ -149,7 +171,7 @@ def update_acl(module):
             try:
                 rules = yml_to_rules(module, rules)
                 if rules.are_rules():
-                    rules = rules.to_json()
+                    rules = rules.to_hcl()
                 else:
                     rules = None
 
@@ -182,16 +204,15 @@ def remove_acl(module):
 
     module.exit_json(changed=changed, token=token)
 
-
 def load_rules_for_token(module, consul_api, token):
     try:
         rules = Rules()
         info = consul_api.acl.info(token)
         if info and info['Rules']:
-            rule_set = to_ascii(info['Rules'])
-            for rule in hcl.loads(rule_set).values():
-                for key, policy in rule.iteritems():
-                    rules.add_rule(Rule(key, policy['policy']))
+            rule_set = hcl.loads(to_ascii(info['Rules']))
+            for rule_type in rule_set:
+                for pattern, policy in rule_set[rule_type].iteritems():
+                    rules.add_rule(rule_type, Rule(pattern, policy['policy']))
         return rules
     except Exception, e:
         module.fail_json(
@@ -209,52 +230,61 @@ def yml_to_rules(module, yml_rules):
     rules = Rules()
     if yml_rules:
         for rule in yml_rules:
-            if not('key' in rule or 'policy' in rule):
-                module.fail_json(msg="a rule requires a key and a policy.")
-            rules.add_rule(Rule(rule['key'], rule['policy']))
+            if ('key' in rule and 'policy' in rule):
+                rules.add_rule('key', Rule(rule['key'], rule['policy']))
+            elif ('service' in rule and 'policy' in rule):
+                rules.add_rule('service', Rule(rule['service'], rule['policy']))
+            else:
+                module.fail_json(msg="a rule requires a key/service and a policy.")
     return rules
 
-template = '''key "%s" {
+template = '''%s "%s" {
   policy = "%s"
-}'''
+}
+'''
+
+RULE_TYPES = ['key', 'service']
 
 class Rules:
 
     def __init__(self):
         self.rules = {}
+        for rule_type in RULE_TYPES:
+            self.rules[rule_type] = {}
 
-    def add_rule(self, rule):
-        self.rules[rule.key] = rule
+    def add_rule(self, rule_type, rule):
+        self.rules[rule_type][rule.pattern] = rule
 
     def are_rules(self):
-        return len(self.rules) > 0
-
-    def to_json(self):
-        rules = {}
-        for key, rule in self.rules.iteritems():
-            rules[key] = {'policy': rule.policy}
-        return json.dumps({'keys': rules})
+        return len(self) > 0
 
     def to_hcl(self):
 
         rules = ""
-        for key, rule in self.rules.iteritems():
-            rules += template % (key, rule.policy)
-
+        for rule_type in RULE_TYPES:
+            for pattern, rule in self.rules[rule_type].iteritems():
+                rules += template % (rule_type, pattern, rule.policy)
         return to_ascii(rules)
+
+    def __len__(self):
+        count = 0
+        for rule_type in RULE_TYPES:
+            count += len(self.rules[rule_type])
+        return count
 
     def __eq__(self, other):
         if not (other or isinstance(other, self.__class__)
-                or len(other.rules) == len(self.rules)):
+                or len(other) == len(self)):
             return False
 
-        for name, other_rule in other.rules.iteritems():
-            if not name in self.rules:
-                return False
-            rule = self.rules[name]
+        for rule_type in RULE_TYPES:
+            for name, other_rule in other.rules[rule_type].iteritems():
+                if not name in self.rules[rule_type]:
+                    return False
+                rule = self.rules[rule_type][name]
 
-            if not (rule and rule == other_rule):
-                return False
+                if not (rule and rule == other_rule):
+                    return False
         return True
 
     def __str__(self):
@@ -262,52 +292,57 @@ class Rules:
 
 class Rule:
 
-    def __init__(self, key, policy):
-        self.key = key
+    def __init__(self, pattern, policy):
+        self.pattern = pattern
         self.policy = policy
 
     def __eq__(self, other):
         return (isinstance(other, self.__class__)
-                and self.key == other.key
+                and self.pattern == other.pattern
                 and self.policy == other.policy)
+
     def __hash__(self):
-        return hash(self.key) ^ hash(self.policy)
+        return hash(self.pattern) ^ hash(self.policy)
 
     def __str__(self):
-        return '%s %s' % (self.key, self.policy)
+        return '%s %s' % (self.pattern, self.policy)
 
 def get_consul_api(module, token=None):
     if not token:
-        token = token = module.params.get('token')
+        token = module.params.get('token')
     return consul.Consul(host=module.params.get('host'),
                          port=module.params.get('port'),
+                         scheme=module.params.get('scheme'),
+                         validate_certs=module.params.get('validate_certs'),
                          token=token)
 
 def test_dependencies(module):
     if not python_consul_installed:
         module.fail_json(msg="python-consul required for this module. "\
               "see http://python-consul.readthedocs.org/en/latest/#installation")
-    
+
     if not pyhcl_installed:
         module.fail_json( msg="pyhcl required for this module."\
               " see https://pypi.python.org/pypi/pyhcl")
 
 def main():
     argument_spec = dict(
-        mgmt_token=dict(required=True),
+        mgmt_token=dict(required=True, no_log=True),
         host=dict(default='localhost'),
+        scheme=dict(required=False, default='http'),
+        validate_certs=dict(required=False, default=True),
         name=dict(required=False),
         port=dict(default=8500, type='int'),
         rules=dict(default=None, required=False, type='list'),
         state=dict(default='present', choices=['present', 'absent']),
-        token=dict(required=False),
+        token=dict(required=False, no_log=True),
         token_type=dict(
             required=False, choices=['client', 'management'], default='client')
     )
     module = AnsibleModule(argument_spec, supports_check_mode=False)
 
     test_dependencies(module)
-    
+
     try:
         execute(module)
     except ConnectionError, e:
@@ -318,4 +353,5 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()

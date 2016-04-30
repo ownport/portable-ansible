@@ -28,6 +28,9 @@ version_added: "1.7"
 short_description: Fetches a file from a given URL
 description:
  - Fetches a file from a URL and saves to locally
+author:
+    - "Paul Durivage (@angstwad)"
+    - "Takeshi Kuramochi (tksarah)"
 options:
   url:
     description:
@@ -49,7 +52,36 @@ options:
     required: false
     choices: [ "yes", "no" ]
     default: yes
-author: "Paul Durivage (@angstwad)"
+  username:
+    description:
+      - Basic authentication username
+    required: false
+    default: null
+  password:
+    description:
+      - Basic authentication password
+    required: false
+    default: null
+  skip_certificate_validation:
+    description:
+      - Skip SSL certificate validation if true
+    required: false
+    default: false
+  proxy_url:
+    description:
+      - The full URL of the proxy server to download through.
+    version_added: "2.0"
+    required: false
+  proxy_username:
+    description:
+      - Proxy authentication username
+    version_added: "2.0"
+    required: false
+  proxy_password:
+    description:
+      - Proxy authentication password
+    version_added: "2.0"
+    required: false
 '''
 
 EXAMPLES = '''
@@ -68,4 +100,12 @@ $ ansible -i hosts -c winrm -m win_get_url -a "url=http://www.example.com/earthr
     url: 'http://www.example.com/earthrise.jpg'
     dest: 'C:\Users\RandomUser\earthrise.jpg'
     force: no
+
+- name: Download earthrise.jpg to 'C:\Users\RandomUser\earthrise.jpg' through a proxy server.
+  win_get_url:
+    url: 'http://www.example.com/earthrise.jpg'
+    dest: 'C:\Users\RandomUser\earthrise.jpg'
+    proxy_url: 'http://10.0.0.1:8080'
+    proxy_username: 'username'
+    proxy_password: 'password'
 '''

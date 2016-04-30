@@ -2,6 +2,21 @@
 # it runs the 'command' module with special arguments and it behaves differently.
 # See the command source and the comment "#USE_SHELL".
 
+# This file is part of Ansible
+#
+# Ansible is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Ansible is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+
 DOCUMENTATION = '''
 ---
 module: shell
@@ -77,4 +92,58 @@ EXAMPLES = '''
   args:
     chdir: somedir/
     creates: somelog.txt
+
+# Run a command that uses non-posix shell-isms (in this example /bin/sh
+# doesn't handle redirection and wildcards together but bash does)
+- shell: cat < /tmp/*txt
+  args:
+    executable: /bin/bash
+'''
+
+RETURN = '''
+msg:
+    description: changed
+    returned: always
+    type: boolean
+    sample: True
+start:
+    description: The command execution start time
+    returned: always
+    type: string
+    sample: '2016-02-25 09:18:26.429568'
+end:
+    description: The command execution end time
+    returned: always
+    type: string
+    sample: '2016-02-25 09:18:26.755339'
+delta:
+    description: The command execution delta time
+    returned: always
+    type: string
+    sample: '0:00:00.325771'
+stdout:
+    description: The command standard output
+    returned: always
+    type: string
+    sample: 'Clustering node rabbit@slave1 with rabbit@master ...'
+stderr:
+    description: The command standard error
+    returned: always
+    type: string
+    sample: 'ls: cannot access foo: No such file or directory'
+cmd:
+    description: The command executed by the task
+    returned: always
+    type: string
+    sample: 'rabbitmqctl join_cluster rabbit@master'
+rc:
+    description: The command return code (0 means success)
+    returned: always
+    type: int
+    sample: 0
+stdout_lines:
+    description: The command standard output split in lines
+    returned: always
+    type: list of strings
+    sample: [u'Clustering node rabbit@slave1 with rabbit@master ...']
 '''

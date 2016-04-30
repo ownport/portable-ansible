@@ -1,160 +1,58 @@
-New module reviewers
+Ansible Extras Reviewers
 ====================
-The following list represents all current Github module reviewers.  It's currently comprised of all Ansible module authors, past and present.
+The Ansible Extras Modules are written and maintained by the Ansible community, and are included in Extras through a community-driven approval process. 
 
-Two +1 votes by any of these module reviewers on a new module pull request will result in the inclusion of that module into Ansible Extras.
-
-Active
-======
-"Adam Garside (@fabulops)"
-"Adam Keech (@smadam813)"
-"Adam Miller (@maxamillion)"
-"Alex Coomans (@drcapulet)"
-"Alexander Bulimov (@abulimov)"
-"Alexander Saltanov (@sashka)"
-"Alexander Winkler (@dermute)"
-"Andrew de Quincey (@adq)"
-"André Paramés (@andreparames)"
-"Andy Hill (@andyhky)"
-"Artūras `arturaz` Šlajus (@arturaz)"
-"Augustus Kling (@AugustusKling)"
-"BOURDEL Paul (@pb8226)"
-"Balazs Pocze (@banyek)"
-"Ben Whaley (@bwhaley)"
-"Benno Joy (@bennojoy)"
-"Bernhard Weitzhofer (@b6d)"
-"Boyd Adamson (@brontitall)"
-"Brad Olson (@bradobro)"
-"Brian Coca (@bcoca)"
-"Brice Burgess (@briceburg)"
-"Bruce Pennypacker (@bpennypacker)"
-"Carson Gee (@carsongee)"
-"Chris Church (@cchurch)"
-"Chris Hoffman (@chrishoffman)"
-"Chris Long (@alcamie101)"
-"Chris Schmidt (@chrisisbeef)"
-"Christian Berendt (@berendt)"
-"Christopher H. Laco (@claco)"
-"Cristian van Ee (@DJMuggs)"
-"Dag Wieers (@dagwieers)"
-"Dane Summers (@dsummersl)"
-"Daniel Jaouen (@danieljaouen)"
-"Daniel Schep (@dschep)"
-"Dariusz Owczarek (@dareko)"
-"Darryl Stoflet (@dstoflet)"
-"David CHANIAL (@davixx)"
-"David Stygstra (@stygstra)"
-"Derek Carter (@goozbach)"
-"Dimitrios Tydeas Mengidis (@dmtrs)" 
-"Doug Luce (@dougluce)"
-"Dylan Martin (@pileofrogs)"
-"Elliott Foster (@elliotttf)"
-"Eric Johnson (@erjohnso)"
-"Evan Duffield (@scicoin-project)"
-"Evan Kaufman (@EvanK)"
-"Evgenii Terechkov (@evgkrsk)"
-"Franck Cuny (@franckcuny)"
-"Gareth Rushgrove (@garethr)"
-"Hagai Kariti (@hkariti)"
-"Hector Acosta (@hacosta)"
-"Hiroaki Nakamura (@hnakamur)"
-"Ivan Vanderbyl (@ivanvanderbyl)"
-"Jakub Jirutka (@jirutka)"
-"James Cammarata (@jimi-c)"
-"James Laska (@jlaska)"
-"James S. Martin (@jsmartin)"
-"Jan-Piet Mens (@jpmens)"
-"Jayson Vantuyl (@jvantuyl)"
-"Jens Depuydt (@jensdepuydt)"
-"Jeroen Hoekx (@jhoekx)"
-"Jesse Keating (@j2sol)"
-"Jim Dalton (@jsdalton)"
-"Jim Richardson (@weaselkeeper)"
-"Jimmy Tang (@jcftang)"
-"Johan Wiren (@johanwiren)"
-"John Dewey (@retr0h)"
-"John Jarvis (@jarv)"
-"John Whitbeck (@jwhitbeck)"
-"Jon Hawkesworth (@jhawkesworth)"
-"Jonas Pfenniger (@zimbatm)"
-"Jonathan I. Davila (@defionscode)"
-"Joseph Callen (@jcpowermac)"
-"Kevin Carter (@cloudnull)"
-"Lester Wade (@lwade)"
-"Lorin Hochstein (@lorin)"
-"Manuel Sousa (@manuel-sousa)"
-"Mark Theunissen (@marktheunissen)"
-"Matt Coddington (@mcodd)"
-"Matt Hite (@mhite)"
-"Matt Makai (@makaimc)"
-"Matt Martz (@sivel)"
-"Matt Wright (@mattupstate)"
-"Matthew Vernon (@mcv21)"
-"Matthew Williams (@mgwilliams)"
-"Matthias Vogelgesang (@matze)"
-"Max Riveiro (@kavu)"
-"Michael Gregson (@mgregson)"
-"Michael J. Schultz (@mjschultz)"
-"Michael Warkentin (@mwarkentin)"
-"Mischa Peters (@mischapeters)"
-"Monty Taylor (@emonty)"
-"Nandor Sivok (@dominis)"
-"Nate Coraor (@natefoo)"
-"Nate Kingsley (@nate-kingsley)"
-"Nick Harring (@NickatEpic)"
-"Patrick Callahan (@dirtyharrycallahan)"
-"Patrick Ogenstad (@ogenstad)"
-"Patrick Pelletier (@skinp)"
-"Patrik Lundin (@eest)"
-"Paul Durivage (@angstwad)"
-"Pavel Antonov (@softzilla)"
-"Pepe Barbe (@elventear)"
-"Peter Mounce (@petemounce)"
-"Peter Oliver (@mavit)"
-"Peter Sprygada (@privateip)"
-"Peter Tan (@tanpeter)"
-"Philippe Makowski (@pmakowski)"
-"Phillip Gentry, CX Inc (@pcgentry)"
-"Quentin Stafford-Fraser (@quentinsf)"
-"Ramon de la Fuente (@ramondelafuente)"
-"Raul Melo (@melodous)" 
-"Ravi Bhure (@ravibhure)"
-"René Moser (@resmo)"
-"Richard Hoop (@rhoop)"
-"Richard Isaacson (@risaacson)" 
-"Rick Mendes (@rickmendes)"
-"Romeo Theriault (@romeotheriault)"
-"Scott Anderson (@tastychutney)"
-"Sebastian Kornehl (@skornehl)"
-"Serge van Ginderachter (@srvg)"
-"Sergei Antipov (@UnderGreen)"
-"Seth Edwards (@sedward)" 
-"Silviu Dicu (@silviud)"
-"Simon JAILLET (@jails)"
-"Stephen Fromm (@sfromm)"
-"Steve (@groks)"
-"Steve Gargan (@sgargan)"
-"Steve Smith (@tarka)"
-"Takashi Someda (@tksmd)"
-"Taneli Leppä (@rosmo)"
-"Tim Bielawa (@tbielawa)"
-"Tim Bielawa (@tbielawa)" 
-"Tim Mahoney (@timmahoney)"
-"Timothy Appnel (@tima)"
-"Tom Bamford (@tombamford)"
-"Trond Hindenes (@trondhindenes)"
-"Vincent Van der Kussen (@vincentvdk)"
-"Vincent Viallet (@zbal)"
-"WAKAYAMA Shirou (@shirou)"
-"Will Thames (@willthames)"
-"Willy Barro (@willybarro)"
-"Xabier Larrakoetxea (@slok)"
-"Yeukhon Wong (@yeukhon)"
-"Zacharie Eakin (@zeekin)"
-"berenddeboer (@berenddeboer)"
-"bleader (@bleader)" 
-"curtis (@ccollicutt)"
-
-Retired
+Expectations
 =======
-None yet :)
+
+1. New modules will be tested in good faith by users who care about them. 
+2. New modules will adhere to the module guidelines, located here: http://docs.ansible.com/ansible/developing_modules.html#module-checklist
+3. The submitter of the module is willing and able to maintain the module over time.
+
+New Modules
+=======
+
+New modules are subject to review by anyone in the Ansible community. For inclusion of a new module into Ansible Extras, a pull request must receive at least one approval from a fellow community member on each of the following criteria:
+
+* One "worksforme" approval from someone who has thoroughly tested the module, including all parameters and switches.
+* One "passes_guidelines" approval from someone who has vetted the code according to the module guidelines.
+
+Either of these approvals can be given, in a comment, by anybody (except the submitter).
+
+Any module that has both of these, and no "needs_revision" votes (which can also be given by anybody) will be approved for inclusion.
+
+The core team will continue to be the point of escalation for any issues that may arise (duplicate modules, disagreements over guidelines, etc.)
+
+Existing Modules
+=======
+
+PRs made against existing modules in Extras are subject to review by the module author or current maintainer. 
+
+Unmaintained Modules
+=======
+
+If modules in Extras go unmaintained, we will seek new maintainers, and if we don't find new
+maintainers, we will ultimately deprecate them.
+
+Subject Matter Experts
+=======
+
+Subject matter experts are groups of acknowledged community members who have expertise and experience in particular modules. Pull requests for existing or new modules are sometimes referred to these wider groups during triage, for expedience or escalation. 
+
+Openstack: @emonty @shrews @dguerri @juliakreger @j2sol @rcarrillocruz
+
+Windows: @trondhindenes @petemounce @elventear @smadam813 @jhawkesworth @angstwad @sivel @chrishoffman @cchurch
+
+AWS: @jsmartin @scicoin-project @tombamford @garethr @jarv @jsdalton @silviud @adq @zbal @zeekin @willthames @lwade @carsongee @defionscode @tastychutney @bpennypacker @loia
+
+Docker: @cove @joshuaconner @softzilla @smashwilson
+
+Red Hat Network: @barnabycourt @vritant @flossware
+
+Zabbix: @cove @harrisongu @abulimov
+
+PR Process
+=======
+
+A full view of the pull request process for Extras can be seen here: 
+![here](http://gregdek.org/extras_PR_process_2015_09.png)

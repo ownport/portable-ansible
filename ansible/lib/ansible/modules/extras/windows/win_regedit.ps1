@@ -21,62 +21,25 @@ $ErrorActionPreference = "Stop"
 # WANT_JSON
 # POWERSHELL_COMMON
 
+New-PSDrive -PSProvider registry -Root HKEY_CLASSES_ROOT -Name HKCR -ErrorAction SilentlyContinue
+New-PSDrive -PSProvider registry -Root HKEY_USERS -Name HKU -ErrorAction SilentlyContinue
+New-PSDrive -PSProvider registry -Root HKEY_CURRENT_CONFIG -Name HCCC -ErrorAction SilentlyContinue
+
 $params = Parse-Args $args;
 $result = New-Object PSObject;
 Set-Attr $result "changed" $false;
+Set-Attr $result "data_changed" $false;
+Set-Attr $result "data_type_changed" $false;
 
-If ($params.key)
-{
-    $registryKey = $params.key
-}
-Else
-{
-    Fail-Json $result "missing required argument: key"
-}
+$registryKey = Get-Attr -obj $params -name "key" -failifempty $true
+$registryValue = Get-Attr -obj $params -name "value" -default $null
+$state = Get-Attr -obj $params -name "state" -validateSet "present","absent" -default "present"
+$registryData = Get-Attr -obj $params -name "data" -default $null
+$registryDataType = Get-Attr -obj $params -name "datatype" -validateSet "binary","dword","expandstring","multistring","string","qword" -default "string"
 
-If ($params.value)
-{
-    $registryValue = $params.value
-}
-Else
-{
-    $registryValue = $null
-}
-
-If ($params.state)
-{
-    $state = $params.state.ToString().ToLower()
-    If (($state -ne "present") -and ($state -ne "absent"))
-    {
-        Fail-Json $result "state is $state; must be present or absent"
-    }
-}
-Else
-{
-    $state = "present"
-}
-
-If ($params.data)
-{
-    $registryData = $params.data
-}
-ElseIf ($state -eq "present" -and $registryValue -ne $null)
+If ($state -eq "present" -and $registryData -eq $null -and $registryValue -ne $null)
 {
     Fail-Json $result "missing required argument: data"
-}
-
-If ($params.datatype)
-{
-    $registryDataType = $params.datatype.ToString().ToLower()
-    $validRegistryDataTypes = "binary", "dword", "expandstring", "multistring", "string", "qword"
-    If ($validRegistryDataTypes -notcontains $registryDataType)
-    {
-        Fail-Json $result "type is $registryDataType; must be binary, dword, expandstring, multistring, string, or qword"
-    }
-}
-Else
-{
-    $registryDataType = "string"
 }
 
 Function Test-RegistryValueData {
@@ -95,19 +58,96 @@ Function Test-RegistryValueData {
     }
 }
 
+# Returns rue if registry data matches.
+# Handles binary and string registry data
+Function Compare-RegistryData {
+    Param (
+        [parameter(Mandatory=$true)]
+        [AllowEmptyString()]$ReferenceData,
+        [parameter(Mandatory=$true)]
+        [AllowEmptyString()]$DifferenceData
+        )
+        $refType = $ReferenceData.GetType().Name
+
+        if ($refType -eq "String" ) {
+            if ($ReferenceData -eq $DifferenceData) {
+                return $true
+            } else {
+                return $false
+            }
+        } elseif ($refType -eq "Object[]") {
+            if (@(Compare-Object $ReferenceData $DifferenceData -SyncWindow 0).Length -eq 0) {
+                return $true
+            } else {
+                return $false
+            }
+        }
+}
+
+# Simplified version of Convert-HexStringToByteArray from
+# https://cyber-defense.sans.org/blog/2010/02/11/powershell-byte-array-hex-convert
+# Expects a hex in the format you get when you run reg.exe export,
+# and converts to a byte array so powershell can modify binary registry entries
+function Convert-RegExportHexStringToByteArray
+{
+    Param (
+     [parameter(Mandatory=$true)] [String] $String
+    )
+
+# remove 'hex:' from the front of the string if present
+$String = $String.ToLower() -replace '^hex\:', ''
+
+#remove whitespace and any other non-hex crud.
+$String = $String.ToLower() -replace '[^a-f0-9\\,x\-\:]',''
+
+# turn commas into colons
+$String = $String -replace ',',':'
+
+#Maybe there's nothing left over to convert...
+if ($String.Length -eq 0) { ,@() ; return }
+
+#Split string with or without colon delimiters.
+if ($String.Length -eq 1)
+{ ,@([System.Convert]::ToByte($String,16)) }
+elseif (($String.Length % 2 -eq 0) -and ($String.IndexOf(":") -eq -1))
+{ ,@($String -split '([a-f0-9]{2})' | foreach-object { if ($_) {[System.Convert]::ToByte($_,16)}}) }
+elseif ($String.IndexOf(":") -ne -1)
+{ ,@($String -split ':+' | foreach-object {[System.Convert]::ToByte($_,16)}) }
+else
+{ ,@() }
+
+}
+
+if($registryDataType -eq "binary" -and $registryData -ne $null) {
+   $registryData = Convert-RegExportHexStringToByteArray($registryData)
+}
+
 if($state -eq "present") {
     if ((Test-Path $registryKey) -and $registryValue -ne $null)
     {
         if (Test-RegistryValueData -Path $registryKey -Value $registryValue)
         {
+            # handle binary data
+            $currentRegistryData =(Get-ItemProperty -Path $registryKey | Select-Object -ExpandProperty $registryValue) 
+
+            if ($registryValue.ToLower() -eq "(default)") {
+                # Special case handling for the key's default property. Because .GetValueKind() doesn't work for the (default) key property
+                $oldRegistryDataType = "String"
+            }
+            else {
+                $oldRegistryDataType = (Get-Item $registryKey).GetValueKind($registryValue)
+            }
+
             # Changes Data and DataType
-            if ((Get-Item $registryKey).GetValueKind($registryValue) -ne $registryDataType)
+            if ($registryDataType -ne $oldRegistryDataType)
             {
                 Try
                 {
                     Remove-ItemProperty -Path $registryKey -Name $registryValue
                     New-ItemProperty -Path $registryKey -Name $registryValue -Value $registryData -PropertyType $registryDataType
                     $result.changed = $true
+                    $result.data_changed = $true
+                    $result.data_type_changed = $true
                 }
                 Catch
                 {
@@ -115,11 +155,12 @@ if($state -eq "present") {
                 }
             }
             # Changes Only Data
-            elseif ((Get-ItemProperty -Path $registryKey | Select-Object -ExpandProperty $registryValue) -ne $registryData) 
+            elseif (-Not (Compare-RegistryData -ReferenceData $currentRegistryData -DifferenceData $registryData))
             {
                 Try {
                     Set-ItemProperty -Path $registryKey -Name $registryValue -Value $registryData
                     $result.changed = $true
+                    $result.data_changed = $true
                 }
                 Catch
                 {
@@ -142,7 +183,7 @@ if($state -eq "present") {
     }
     elseif(-not (Test-Path $registryKey))
     {
-        Try 
+        Try
         {
             $newRegistryKey = New-Item $registryKey -Force
             $result.changed = $true

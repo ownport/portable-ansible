@@ -42,6 +42,16 @@ options:
     required: false
     default: 'present'
     choices: [ 'present', 'absent' ]
+  domain:
+    description:
+      - Domain the security group is related to.
+    required: false
+    default: null
+  account:
+    description:
+      - Account the security group is related to.
+    required: false
+    default: null
   project:
     description:
       - Name of the project the security group to be created in.
@@ -66,6 +76,11 @@ EXAMPLES = '''
 
 RETURN = '''
 ---
+id:
+  description: UUID of the security group.
+  returned: success
+  type: string
+  sample: a6f7a5fc-43f8-11e5-a151-feff819cdc9f
 name:
   description: Name of security group.
   returned: success
@@ -76,6 +91,26 @@ description:
   returned: success
   type: string
   sample: application security group
+tags:
+  description: List of resource tags associated with the security group.
+  returned: success
+  type: dict
+  sample: '[ { "key": "foo", "value": "bar" } ]'
+project:
+  description: Name of project the security group is related to.
+  returned: success
+  type: string
+  sample: Production
+domain:
+  description: Domain the security group is related to.
+  returned: success
+  type: string
+  sample: example domain
+account:
+  description: Account the security group is related to.
+  returned: success
+  type: string
+  sample: example account
 '''
 
 try:
@@ -91,21 +126,22 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackSecurityGroup, self).__init__(module)
         self.security_group = None
 
 
     def get_security_group(self):
         if not self.security_group:
-            sg_name = self.module.params.get('name')
+
             args = {}
-            args['projectid'] = self.get_project('id')
+            args['projectid'] = self.get_project(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
+            args['securitygroupname'] = self.module.params.get('name')
+
             sgs = self.cs.listSecurityGroups(**args)
             if sgs:
-                for s in sgs['securitygroup']:
-                    if s['name'] == sg_name:
-                        self.security_group = s
-                        break
+                self.security_group = sgs['securitygroup'][0]
         return self.security_group
 
 
@@ -116,7 +152,9 @@ class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
 
             args = {}
             args['name'] = self.module.params.get('name')
-            args['projectid'] = self.get_project('id')
+            args['projectid'] = self.get_project(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
             args['description'] = self.module.params.get('description')
 
             if not self.module.check_mode:
@@ -135,7 +173,9 @@ class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
 
             args = {}
             args['name'] = self.module.params.get('name')
-            args['projectid'] = self.get_project('id')
+            args['projectid'] = self.get_project(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
 
             if not self.module.check_mode:
                 res = self.cs.deleteSecurityGroup(**args)
@@ -145,31 +185,21 @@ class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
         return security_group
 
 
-    def get_result(self, security_group):
-        if security_group:
-            if 'name' in security_group:
-                self.result['name'] = security_group['name']
-            if 'description' in security_group:
-                self.result['description'] = security_group['description']
-        return self.result
-
 
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        description = dict(default=None),
+        state = dict(choices=['present', 'absent'], default='present'),
+        project = dict(default=None),
+        account = dict(default=None),
+        domain = dict(default=None),
+    ))
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            description = dict(default=None),
-            state = dict(choices=['present', 'absent'], default='present'),
-            project = dict(default=None),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-        ),
+        argument_spec=argument_spec,
+        required_together=cs_required_together(),
         supports_check_mode=True
     )
 
@@ -187,7 +217,7 @@ def main():
 
         result = acs_sg.get_result(sg)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

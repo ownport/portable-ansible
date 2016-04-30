@@ -50,7 +50,8 @@ options:
     validate_certs:
         description:
             - If C(no), SSL certificates will not be validated. This should only be used
-              on personally controlled sites using self-signed certificates.
+              on personally controlled sites.  Prior to 2.0, this module would always
+              validate on python >= 2.7.9 and never validate on python <= 2.7.8
         required: false
         default: 'yes'
         choices: ['yes', 'no']
@@ -113,6 +114,13 @@ options:
             - Pool member ratio weight. Valid values range from 1 through 100. New pool members -- unless overriden with this value -- default to 1.
         required: false
         default: null
+    preserve_node:
+        description:
+            - When state is absent and the pool member is no longer referenced in other pools, the default behavior removes the unused node object. Setting this to 'yes' disables this behavior.
+        required: false
+        default: 'no'
+        choices: ['yes', 'no']
+        version_added: 2.1
 '''
 
 EXAMPLES = '''
@@ -316,7 +324,8 @@ def main():
             connection_limit = dict(type='int'),
             description = dict(type='str'),
             rate_limit = dict(type='int'),
-            ratio = dict(type='int')
+            ratio = dict(type='int'),
+            preserve_node = dict(type='bool', default=False)
         )
     )
 
@@ -336,18 +345,19 @@ def main():
     host = module.params['host']
     address = fq_name(partition, host)
     port = module.params['port']
+    preserve_node = module.params['preserve_node']
 
 
     # sanity check user supplied values
 
-    if (host and not port) or (port and not host):
+    if (host and port is None) or (port is not None and not host):
         module.fail_json(msg="both host and port must be supplied")
 
-    if 1 > port > 65535:
-        module.fail_json(msg="valid ports must be in range 1 - 65535")
+    if 0 > port or port > 65535:
+        module.fail_json(msg="valid ports must be in range 0 - 65535")
 
     try:
-        api = bigip_api(server, user, password)
+        api = bigip_api(server, user, password, validate_certs)
         if not pool_exists(api, pool):
             module.fail_json(msg="pool %s does not exist" % pool)
         result = {'changed': False}  # default
@@ -356,8 +366,11 @@ def main():
             if member_exists(api, pool, address, port):
                 if not module.check_mode:
                     remove_pool_member(api, pool, address, port)
-                    deleted = delete_node_address(api, address)
-                    result = {'changed': True, 'deleted': deleted}
+                    if preserve_node:
+                        result = {'changed': True}
+                    else:
+                        deleted = delete_node_address(api, address)
+                        result = {'changed': True, 'deleted': deleted}
                 else:
                     result = {'changed': True}
 
@@ -426,4 +439,3 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.f5 import *
 main()
-

@@ -22,7 +22,15 @@ You should have received a copy of the GNU General Public License
 along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import json
+try:
+    import json
+except ImportError:
+    try:
+        import simplejson as json
+    except ImportError:
+        # Let snippet from module_utils/basic.py return a proper error in this case
+        pass
+
 import datetime
 import base64
 import os
@@ -38,7 +46,6 @@ author: "curtis (@ccollicutt)"
 requirements:
     - Boundary API access
     - bprobe is required to send data, but not to register a meter
-    - Python urllib2
 options:
     name:
         description:
@@ -212,7 +219,7 @@ def download_request(module, name, apiid, apikey, cert_type):
                 body = response.read()
                 cert_file = open(cert_file_path, 'w')
                 cert_file.write(body)
-                cert_file.close
+                cert_file.close()
                 os.chmod(cert_file_path, 0600)
             except: 
                 module.fail_json("Could not write to certificate file")
@@ -252,5 +259,6 @@ def main():
 # import module snippets
 from ansible.module_utils.basic import *
 from ansible.module_utils.urls import *
-main()
+if __name__ == '__main__':
+    main()
 

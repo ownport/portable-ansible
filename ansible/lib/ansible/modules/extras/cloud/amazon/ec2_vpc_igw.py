@@ -20,7 +20,7 @@ short_description: Manage an AWS VPC Internet gateway
 description:
     - Manage an AWS VPC Internet gateway
 version_added: "2.0"
-author: Robert Estelle, @erydo
+author: Robert Estelle (@erydo)
 options:
   vpc_id:
     description:
@@ -32,23 +32,23 @@ options:
       - Create or terminate the IGW
     required: false
     default: present
-extends_documentation_fragment: aws
+    choices: [ 'present', 'absent' ]
+extends_documentation_fragment:
+    - aws
+    - ec2
 '''
 
 EXAMPLES = '''
 # Note: These examples do not set authentication details, see the AWS Guide for details.
 
 # Ensure that the VPC has an Internet Gateway.
-# The Internet Gateway ID is can be accessed via {{igw.gateway_id}} for use
-# in setting up NATs etc.
-      local_action:
-        module: ec2_vpc_igw
-        vpc_id: {{vpc.vpc_id}}
-        region: {{vpc.vpc.region}}
-        state: present
-      register: igw
-'''
+# The Internet Gateway ID is can be accessed via {{igw.gateway_id}} for use in setting up NATs etc.
+ec2_vpc_igw:
+  vpc_id: vpc-abcdefgh
+  state: present
+register: igw
 
+'''
 
 import sys  # noqa
 
@@ -117,7 +117,7 @@ def main():
     argument_spec.update(
         dict(
             vpc_id = dict(required=True),
-            state = dict(choices=['present', 'absent'], default='present')
+            state = dict(default='present', choices=['present', 'absent'])
         )
     )
 
@@ -133,8 +133,8 @@ def main():
 
     if region:
         try:
-            connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError), e:
+            connection = connect_to_aws(boto.vpc, region, **aws_connect_params)
+        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError), e:
             module.fail_json(msg=str(e))
     else:
         module.fail_json(msg="region must be specified")

@@ -30,8 +30,8 @@ import os
 DOCUMENTATION = '''
 ---
 module: command
-version_added: historical
 short_description: Executes a command on a remote node
+version_added: historical
 description:
      - The M(command) module takes the command name followed by a list of space-delimited arguments.
      - The given command will be executed on all selected nodes. It will not be
@@ -45,15 +45,14 @@ options:
         See the examples!
     required: true
     default: null
-    aliases: []
   creates:
     description:
-      - a filename or glob pattern, when it already exists, this step will B(not) be run.
+      - a filename or (since 2.0) glob pattern, when it already exists, this step will B(not) be run.
     required: no
     default: null
   removes:
     description:
-      - a filename or glob pattern, when it does not exist, this step will B(not) be run.
+      - a filename or (since 2.0) glob pattern, when it does not exist, this step will B(not) be run.
     version_added: "0.8"
     required: no
     default: null
@@ -75,7 +74,6 @@ options:
     description:
       - if command warnings are on in ansible.cfg, do not warn about this particular line if set to no/false.
     required: false
-    default: True
 notes:
     -  If you want to run a command through the shell (say you are using C(<),
        C(>), C(|), etc), you actually want the M(shell) module instead. The
@@ -139,17 +137,20 @@ def check_command(commandline):
     arguments = { 'chown': 'owner', 'chmod': 'mode', 'chgrp': 'group',
                   'ln': 'state=link', 'mkdir': 'state=directory',
                   'rmdir': 'state=absent', 'rm': 'state=absent', 'touch': 'state=touch' }
-    commands  = { 'git': 'git', 'hg': 'hg', 'curl': 'get_url', 'wget': 'get_url',
+    commands  = { 'git': 'git', 'hg': 'hg', 'curl': 'get_url or uri', 'wget': 'get_url or uri',
                   'svn': 'subversion', 'service': 'service',
-                  'mount': 'mount', 'rpm': 'yum', 'yum': 'yum', 'apt-get': 'apt-get',
+                  'mount': 'mount', 'rpm': 'yum, dnf or zypper', 'yum': 'yum', 'apt-get': 'apt-get',
                   'tar': 'unarchive', 'unzip': 'unarchive', 'sed': 'template or lineinfile',
-                  'rsync': 'synchronize' }
+                  'rsync': 'synchronize', 'dnf': 'dnf', 'zypper': 'zypper' }
+    become   = [ 'sudo', 'su', 'pbrun', 'pfexec', 'runas' ]
     warnings = list()
     command = os.path.basename(commandline.split()[0])
     if command in arguments:
         warnings.append("Consider using file module with %s rather than running %s" % (arguments[command], command))
     if command in commands:
         warnings.append("Consider using %s module rather than running %s" % (commands[command], command))
+    if command in become:
+        warnings.append("Consider using 'become', 'become_method', and 'become_user' rather than running %s" % (command,))
     return warnings
 
 

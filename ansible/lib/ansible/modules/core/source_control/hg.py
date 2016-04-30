@@ -65,6 +65,13 @@ options:
         required: false
         default: "no"
         choices: [ "yes", "no" ]
+    update:
+        required: false
+        default: "yes"
+        choices: [ "yes", "no" ]
+        version_added: "2.0"
+        description:
+            - If C(no), do not retrieve new revisions from the origin repository
     executable:
         required: false
         default: null
@@ -130,9 +137,7 @@ class Hg(object):
         if not before:
             return False
 
-        args = ['update', '-C', '-R', self.dest]
-        if self.revision is not None:
-            args = args + ['-r', self.revision]
+        args = ['update', '-C', '-R', self.dest, '-r', '.']
         (rc, out, err) = self._command(args)
         if rc != 0:
             self.module.fail_json(msg=err)
@@ -210,6 +215,7 @@ def main():
             revision = dict(default=None, aliases=['version']),
             force = dict(default='no', type='bool'),
             purge = dict(default='no', type='bool'),
+            update = dict(default='yes', type='bool'),
             executable = dict(default=None),
         ),
     )
@@ -218,6 +224,7 @@ def main():
     revision = module.params['revision']
     force = module.params['force']
     purge = module.params['purge']
+    update = module.params['update']
     hg_path = module.params['executable'] or module.get_bin_path('hg', True)
     hgrc = os.path.join(dest, '.hg/hgrc')
 
@@ -234,6 +241,9 @@ def main():
         (rc, out, err) = hg.clone()
         if rc != 0:
             module.fail_json(msg=err)
+    elif not update:
+        # Just return having found a repo already in the dest path
+        before = hg.get_revision()
     elif hg.at_revision:
         # no update needed, don't pull
         before = hg.get_revision()

@@ -70,7 +70,9 @@ options:
     default: root
   cron_file:
     description:
-      - If specified, uses this file in cron.d instead of an individual user's crontab.
+      - If specified, uses this file instead of an individual user's crontab.
+        Without a leading /, this is assumed to be in /etc/cron.d.  With a leading
+        /, this is taken as absolute.
     required: false
     default: null
   backup:
@@ -124,11 +126,13 @@ class CronVar(object):
             self.user = 'root'
         self.lines = None
         self.wordchars = ''.join(chr(x) for x in range(128) if chr(x) not in ('=', "'", '"', ))
-        # select whether we dump additional debug info through syslog
-        self.syslogging = False
 
         if cron_file:
-            self.cron_file = '/etc/cron.d/%s' % cron_file
+            self.cron_file = ""
+            if os.path.isabs(cron_file):
+                self.cron_file = cron_file
+            else:
+                self.cron_file = os.path.join('/etc/cron.d', cron_file)
         else:
             self.cron_file = None
 
@@ -165,8 +169,7 @@ class CronVar(object):
                 count += 1
 
     def log_message(self, message):
-        if self.syslogging:
-            syslog.syslog(syslog.LOG_NOTICE, 'ansible: "%s"' % message)
+        self.module.debug('ansible: "%s"' % message)
 
     def write(self, backup_file=None):
         """
@@ -363,9 +366,7 @@ def main():
     os.umask(022)
     cronvar = CronVar(module, user, cron_file)
 
-    if cronvar.syslogging:
-        syslog.openlog('ansible-%s' % os.path.basename(__file__))
-        syslog.syslog(syslog.LOG_NOTICE, 'cronvar instantiated - name: "%s"' % name)
+    module.debug('cronvar instantiated - name: "%s"' % name)
 
     # --- user input validation ---
 

@@ -39,7 +39,7 @@ If (($state -Ne $FALSE) -And ($state -NotIn $valid_states)) {
 # Attributes parameter - Pipe separated list of attributes where
 # keys and values are separated by comma (paramA:valyeA|paramB:valueB)
 $attributes = @{};
-If ($params.attributes) {
+If (Get-Member -InputObject $params -Name attributes) {
   $params.attributes -split '\|' | foreach {
     $key, $value = $_ -split "\:";
     $attributes.Add($key, $value);
@@ -101,12 +101,15 @@ try {
 
 # Result
 $pool = Get-Item IIS:\AppPools\$name
-$result.info = @{
-  name = $pool.Name
-  state = $pool.State
-  attributes =  New-Object psobject @{}
-};
-
-$pool.Attributes | ForEach { $result.info.attributes.Add($_.Name, $_.Value)};
+if ($pool)
+{
+  $result.info = @{
+    name = $pool.Name
+    state = $pool.State
+    attributes =  New-Object psobject @{}
+  };
+  
+  $pool.Attributes | ForEach { $result.info.attributes.Add($_.Name, $_.Value)};
+}
 
 Exit-Json $result

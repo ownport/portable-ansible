@@ -32,7 +32,6 @@ options:
       - Action to take.
       - servicegroup options were added in 2.0.
     required: true
-    default: null
     choices: [ "downtime", "enable_alerts", "disable_alerts", "silence", "unsilence",
                "silence_nagios", "unsilence_nagios", "command", "servicegroup_service_downtime",
                "servicegroup_host_downtime" ]
@@ -72,11 +71,10 @@ options:
         B(Required) option when using the C(downtime), C(enable_alerts), and C(disable_alerts) actions.
     aliases: [ "service" ]
     required: true
-    default: null
   servicegroup:
     version_added: "2.0"
     description:
-      - the Servicegroup we want to set downtimes/alerts for.
+      - The Servicegroup we want to set downtimes/alerts for.
         B(Required) option when using the C(servicegroup_service_downtime) amd C(servicegroup_host_downtime).
   command:
     description:
@@ -84,10 +82,8 @@ options:
         should not include the submitted time header or the line-feed
         B(Required) option when using the C(command) action.
     required: true
-    default: null
 
-author: "Tim Bielawa (@tbielawa)" 
-requirements: [ "Nagios" ]
+author: "Tim Bielawa (@tbielawa)"
 '''
 
 EXAMPLES = '''
@@ -270,7 +266,7 @@ def main():
             module.fail_json(msg='no command passed for command action')
     ##################################################################
     if not cmdfile:
-        module.fail_json('unable to locate nagios.cfg')
+        module.fail_json(msg='unable to locate nagios.cfg')
 
     ##################################################################
     ansible_nagios = Nagios(module, **module.params)
@@ -877,7 +873,7 @@ class Nagios(object):
         pre = '[%s]' % int(time.time())
 
         post = '\n'
-        cmdstr = '%s %s %s' % (pre, cmd, post)
+        cmdstr = '%s %s%s' % (pre, cmd, post)
         self._write_command(cmdstr)
 
     def act(self):
@@ -913,6 +909,8 @@ class Nagios(object):
         elif self.action == 'enable_alerts':
             if self.services == 'host':
                 self.enable_host_notifications(self.host)
+            elif self.services == 'all':
+                self.enable_host_svc_notifications(self.host)
             else:
                 self.enable_svc_notifications(self.host,
                                               services=self.services)
@@ -920,6 +918,8 @@ class Nagios(object):
         elif self.action == 'disable_alerts':
             if self.services == 'host':
                 self.disable_host_notifications(self.host)
+            elif self.services == 'all':
+                self.disable_host_svc_notifications(self.host)
             else:
                 self.disable_svc_notifications(self.host,
                                                services=self.services)

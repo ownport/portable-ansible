@@ -57,6 +57,11 @@ options:
       - Account the affinity group is related to.
     required: false
     default: null
+  project:
+    description:
+      - Name of the project the affinity group is related to.
+    required: false
+    default: null
   poll_async:
     description:
       - Poll async jobs until job has finished.
@@ -81,6 +86,11 @@ EXAMPLES = '''
 
 RETURN = '''
 ---
+id:
+  description: UUID of the affinity group.
+  returned: success
+  type: string
+  sample: 87b1e0ce-4e01-11e4-bb66-0050569e64b8
 name:
   description: Name of affinity group.
   returned: success
@@ -96,6 +106,21 @@ affinity_type:
   returned: success
   type: string
   sample: host anti-affinity
+project:
+  description: Name of project the affinity group is related to.
+  returned: success
+  type: string
+  sample: Production
+domain:
+  description: Domain the affinity group is related to.
+  returned: success
+  type: string
+  sample: example domain
+account:
+  description: Account the affinity group is related to.
+  returned: success
+  type: string
+  sample: example account
 '''
 
 try:
@@ -111,24 +136,25 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackAffinityGroup(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackAffinityGroup, self).__init__(module)
+        self.returns = {
+            'type': 'affinity_type',
+        }
         self.affinity_group = None
 
 
     def get_affinity_group(self):
         if not self.affinity_group:
-            affinity_group = self.module.params.get('name')
 
             args                = {}
+            args['projectid']   = self.get_project(key='id')
             args['account']     = self.get_account('name')
             args['domainid']    = self.get_domain('id')
+            args['name']        = self.module.params.get('name')
 
             affinity_groups = self.cs.listAffinityGroups(**args)
             if affinity_groups:
-                for a in affinity_groups['affinitygroup']:
-                    if affinity_group in [ a['name'], a['id'] ]:
-                        self.affinity_group = a
-                        break
+                self.affinity_group = affinity_groups['affinitygroup'][0]
         return self.affinity_group
 
 
@@ -155,6 +181,7 @@ class AnsibleCloudStackAffinityGroup(AnsibleCloudStack):
             args['name']        = self.module.params.get('name')
             args['type']        = self.get_affinity_type()
             args['description'] = self.module.params.get('description')
+            args['projectid']   = self.get_project(key='id')
             args['account']     = self.get_account('name')
             args['domainid']    = self.get_domain('id')
 
@@ -177,6 +204,7 @@ class AnsibleCloudStackAffinityGroup(AnsibleCloudStack):
 
             args                = {}
             args['name']        = self.module.params.get('name')
+            args['projectid']   = self.get_project(key='id')
             args['account']     = self.get_account('name')
             args['domainid']    = self.get_domain('id')
 
@@ -192,40 +220,22 @@ class AnsibleCloudStackAffinityGroup(AnsibleCloudStack):
         return affinity_group
 
 
-    def get_result(self, affinity_group):
-        if affinity_group:
-            if 'name' in affinity_group:
-                self.result['name'] = affinity_group['name']
-            if 'description' in affinity_group:
-                self.result['description'] = affinity_group['description']
-            if 'type' in affinity_group:
-                self.result['affinity_type'] = affinity_group['type']
-            if 'domain' in affinity_group:
-                self.result['domain'] = affinity_group['domain']
-            if 'account' in affinity_group:
-                self.result['account'] = affinity_group['account']
-        return self.result
-
-
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        affinty_type = dict(default=None),
+        description = dict(default=None),
+        state = dict(choices=['present', 'absent'], default='present'),
+        domain = dict(default=None),
+        account = dict(default=None),
+        project = dict(default=None),
+        poll_async = dict(type='bool', default=True),
+    ))
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            affinty_type = dict(default=None),
-            description = dict(default=None),
-            state = dict(choices=['present', 'absent'], default='present'),
-            domain = dict(default=None),
-            account = dict(default=None),
-            poll_async = dict(choices=BOOLEANS, default=True),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-        ),
+        argument_spec=argument_spec,
+        required_together=cs_required_together(),
         supports_check_mode=True
     )
 
@@ -243,7 +253,7 @@ def main():
 
         result = acs_ag.get_result(affinity_group)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

@@ -97,14 +97,18 @@ EXAMPLES = '''
 - riak: wait_for_service=kv
 '''
 
-import urllib2
 import time
 import socket
 import sys
+
 try:
     import json
 except ImportError:
-    import simplejson as json
+    try:
+        import simplejson as json
+    except ImportError:
+        # Let snippet from module_utils/basic.py return a proper error in this case
+        pass
 
 
 def ring_check(module, riak_admin_bin):
@@ -121,7 +125,7 @@ def main():
         argument_spec=dict(
         command=dict(required=False, default=None, choices=[
                     'ping', 'kv_test', 'join', 'plan', 'commit']),
-        config_dir=dict(default='/etc/riak'),
+        config_dir=dict(default='/etc/riak', type='path'),
         http_conn=dict(required=False, default='127.0.0.1:8098'),
         target_node=dict(default='riak@127.0.0.1', required=False),
         wait_for_handoffs=dict(default=False, type='int'),
@@ -254,5 +258,5 @@ def main():
 # import module snippets
 from ansible.module_utils.basic import *
 from ansible.module_utils.urls import *
-
-main()
+if __name__ == '__main__':
+    main()

@@ -17,7 +17,15 @@
 # WANT_JSON
 # POWERSHELL_COMMON
 
-$params = Parse-Args $args;
+$params = Parse-Args $args $true;
+
+function Date_To_Timestamp($start_date, $end_date)
+{
+    If($start_date -and $end_date)
+    {
+        Write-Output (New-TimeSpan -Start $start_date -End $end_date).TotalSeconds
+    }
+}
 
 $path = Get-Attr $params "path" $FALSE;
 If ($path -eq $FALSE)
@@ -26,6 +34,8 @@ If ($path -eq $FALSE)
 }
 
 $get_md5 = Get-Attr $params "get_md5" $TRUE | ConvertTo-Bool;
+# until we support real aliasing, get the default value from get_md5
+$get_checksum = Get-Attr $params "get_checksum" $get_md5 | ConvertTo-Bool;
 
 $result = New-Object psobject @{
     stat = New-Object psobject
@@ -35,23 +45,52 @@ $result = New-Object psobject @{
 If (Test-Path $path)
 {
     Set-Attr $result.stat "exists" $TRUE;
+
     $info = Get-Item $path;
-    If ($info.Directory) # Only files have the .Directory attribute.
+    $iscontainer = Get-Attr $info "PSIsContainer" $null;
+    $length = Get-Attr $info "Length" $null;
+    $extension = Get-Attr $info "Extension" $null;
+    $attributes = Get-Attr $info "Attributes" "";
+    If ($info)
     {
-        Set-Attr $result.stat "isdir" $FALSE;
-        Set-Attr $result.stat "size" $info.Length;
+        $accesscontrol = $info.GetAccessControl();
     }
     Else
     {
+        $accesscontrol = $null;
+    }
+    $owner = Get-Attr $accesscontrol "Owner" $null;
+    $creationtime = Get-Attr $info "CreationTime" $null;
+    $lastaccesstime = Get-Attr $info "LastAccessTime" $null;
+    $lastwritetime = Get-Attr $info "LastWriteTime" $null;
+
+
+    $epoch_date = Get-Date -Date "01/01/1970"
+    If ($iscontainer)
+    {
         Set-Attr $result.stat "isdir" $TRUE;
     }
+    Else
+    {
+        Set-Attr $result.stat "isdir" $FALSE;
+        Set-Attr $result.stat "size" $length;
+    }
+    Set-Attr $result.stat "extension" $extension;
+    Set-Attr $result.stat "attributes" $attributes.ToString();
+    # Set-Attr $result.stat "owner" $getaccesscontrol.Owner;
+    # Set-Attr $result.stat "owner" $info.GetAccessControl().Owner;
+    Set-Attr $result.stat "owner" $owner;
+    Set-Attr $result.stat "creationtime" (Date_To_Timestamp $epoch_date $creationtime);
+    Set-Attr $result.stat "lastaccesstime" (Date_To_Timestamp $epoch_date $lastaccesstime);
+    Set-Attr $result.stat "lastwritetime" (Date_To_Timestamp $epoch_date $lastwritetime);
 }
 Else
 {
     Set-Attr $result.stat "exists" $FALSE;
 }
 
-If ($get_md5 -and $result.stat.exists -and -not $result.stat.isdir)
+# only check get_checksum- it either got its value from get_md5 or was set directly.
+If (($get_checksum) -and $result.stat.exists -and -not $result.stat.isdir)
 {
     $hash = Get-FileChecksum($path);
     Set-Attr $result.stat "md5" $hash;

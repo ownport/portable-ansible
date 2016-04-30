@@ -37,6 +37,7 @@ options:
   api_token:
     description:
      - DigitalOcean api token.
+    version_added: "1.9.5"
   id:
     description:
      - Numeric, the droplet id you want to operate on.
@@ -82,7 +83,7 @@ options:
   user_data:
     description:
       - opaque blob of data which is made available to the droplet
-    version_added: "1.10"
+    version_added: "2.0"
     required: false
     default: None
   wait:
@@ -100,8 +101,9 @@ options:
 
 notes:
   - Two environment variables can be used, DO_API_KEY and DO_API_TOKEN. They both refer to the v2 token.
-  - As of Ansible 2.0, Version 2 of the DigitalOcean API is used.
-  - As of Ansible 2.0, the above parameters were changed significantly. If you are running 1.9.x or earlier, please use C(ansible-doc digital_ocean) to view the correct parameters for your version. Dedicated web docs will be available in the near future for the stable branch.
+  - As of Ansible 1.9.5 and 2.0, Version 2 of the DigitalOcean API is used, this removes C(client_id) and C(api_key) options in favor of C(api_token).
+  - If you are running Ansible 1.9.4 or earlier you might not be able to use the included version of this module as the API version used has been retired. 
+    Upgrade Ansible or, if unable to, try downloading the latest version of this module from github and putting it into a 'library' directory.
 requirements:
   - "python >= 2.6"
   - dopy
@@ -113,26 +115,28 @@ EXAMPLES = '''
 # If a key matches this name, will return the ssh key id and changed = False
 # If no existing key matches this name, a new key is created, the ssh key id is returned and changed = False
 
-- digital_ocean: >
-      state=present
-      command=ssh
-      name=my_ssh_key
-      ssh_pub_key='ssh-rsa AAAA...'
-      api_token=XXX
+- digital_ocean:
+    state: present
+    command: ssh
+    name: my_ssh_key
+    ssh_pub_key: 'ssh-rsa AAAA...'
+    api_token: XXX
 
 # Create a new Droplet
 # Will return the droplet details including the droplet id (used for idempotence)
 
-- digital_ocean: >
-      state=present
-      command=droplet
-      name=mydroplet
-      api_token=XXX
-      size_id=2gb
-      region_id=ams2
-      image_id=fedora-19-x64
-      wait_timeout=500
+- digital_ocean:
+    state: present
+    command: droplet
+    name: mydroplet
+    api_token: XXX
+    size_id: 2gb
+    region_id: ams2
+    image_id: fedora-19-x64
+    wait_timeout: 500
+
   register: my_droplet
+
 - debug: msg="ID is {{ my_droplet.droplet.id }}"
 - debug: msg="IP is {{ my_droplet.droplet.ip_address }}"
 
@@ -140,30 +144,31 @@ EXAMPLES = '''
 # If droplet id already exist, will return the droplet details and changed = False
 # If no droplet matches the id, a new droplet will be created and the droplet details (including the new id) are returned, changed = True.
 
-- digital_ocean: >
-      state=present
-      command=droplet
-      id=123
-      name=mydroplet
-      api_token=XXX
-      size_id=2gb
-      region_id=ams2
-      image_id=fedora-19-x64
-      wait_timeout=500
+- digital_ocean:
+    state: present
+    command: droplet
+    id: 123
+    name: mydroplet
+    api_token: XXX
+    size_id: 2gb
+    region_id: ams2
+    image_id: fedora-19-x64
+    wait_timeout: 500
 
 # Create a droplet with ssh key
 # The ssh key id can be passed as argument at the creation of a droplet (see ssh_key_ids).
 # Several keys can be added to ssh_key_ids as id1,id2,id3
 # The keys are used to connect as root to the droplet.
 
-- digital_ocean: >
-      state=present
-      ssh_key_ids=123,456
-      name=mydroplet
-      api_token=XXX
-      size_id=2gb
-      region_id=ams2
-      image_id=fedora-19-x64
+- digital_ocean:
+    state: present
+    ssh_key_ids: 123,456
+    name: mydroplet
+    api_token: XXX
+    size_id: 2gb
+    region_id: ams2
+    image_id: fedora-19-x64
+
 '''
 
 import os

@@ -71,7 +71,7 @@ EXAMPLES = '''
 RETURN = '''
 ---
 id:
-  description: ID of the instance group.
+  description: UUID of the instance group.
   returned: success
   type: string
   sample: 04589590-ac63-4ffc-93f5-b698b8ac38b6
@@ -115,7 +115,7 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackInstanceGroup(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackInstanceGroup, self).__init__(module)
         self.instance_group = None
 
 
@@ -169,40 +169,19 @@ class AnsibleCloudStackInstanceGroup(AnsibleCloudStack):
         return instance_group
 
 
-    def get_result(self, instance_group):
-        if instance_group:
-            if 'id' in instance_group:
-                self.result['id'] = instance_group['id']
-            if 'created' in instance_group:
-                self.result['created'] = instance_group['created']
-            if 'name' in instance_group:
-                self.result['name'] = instance_group['name']
-            if 'project' in instance_group:
-                self.result['project'] = instance_group['project']
-            if 'domain' in instance_group:
-                self.result['domain'] = instance_group['domain']
-            if 'account' in instance_group:
-                self.result['account'] = instance_group['account']
-        return self.result
-
-
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        state = dict(default='present', choices=['present', 'absent']),
+        domain = dict(default=None),
+        account = dict(default=None),
+        project = dict(default=None),
+    ))
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            state = dict(default='present', choices=['present', 'absent']),
-            domain = dict(default=None),
-            account = dict(default=None),
-            project = dict(default=None),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-        ),
+        argument_spec=argument_spec,
+        required_together=cs_required_together(),
         supports_check_mode=True
     )
 
@@ -220,7 +199,7 @@ def main():
 
         result = acs_ig.get_result(instance_group)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

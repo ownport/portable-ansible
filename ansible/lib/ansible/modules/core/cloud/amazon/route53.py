@@ -24,75 +24,67 @@ description:
 options:
   command:
     description:
-      - Specifies the action to take.  
+      - Specifies the action to take.
     required: true
-    default: null
-    aliases: []
     choices: [ 'get', 'create', 'delete' ]
   zone:
     description:
       - The DNS zone to modify
     required: true
-    default: null
-    aliases: []
   hosted_zone_id:
     description:
       - The Hosted Zone ID of the DNS zone to modify
     required: false
-    version_added: 2.0
+    version_added: "2.0"
     default: null
   record:
     description:
       - The full DNS record to create or delete
     required: true
-    default: null
-    aliases: []
   ttl:
     description:
       - The TTL to give the new record
     required: false
     default: 3600 (one hour)
-    aliases: []
   type:
     description:
       - The type of DNS record to create
     required: true
-    default: null
-    aliases: []
-    choices: [ 'A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS' ]
+    choices: [ 'A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS', 'SOA' ]
   alias:
     description:
       - Indicates if this is an alias record.
     required: false
-    version_added: 1.9
+    version_added: "1.9"
     default: False
-    aliases: []
     choices: [ 'True', 'False' ]
   alias_hosted_zone_id:
     description:
       - The hosted zone identifier.
     required: false
-    version_added: 1.9
+    version_added: "1.9"
     default: null
-    aliases: []
+  alias_evaluate_target_health:
+    description:
+      - Whether or not to evaluate an alias target health. Useful for aliases to Elastic Load Balancers.
+    required: false
+    version_added: "2.1"
+    default: false
   value:
     description:
       - The new value when creating a DNS record.  Multiple comma-spaced values are allowed for non-alias records.  When deleting a record all values for the record must be specified or Route53 will not delete it.
     required: false
     default: null
-    aliases: []
   overwrite:
     description:
       - Whether an existing record should be overwritten on create if values do not match
     required: false
     default: null
-    aliases: []
   retry_interval:
     description:
       - In the case that route53 is still servicing a prior request, this module will wait and try again after this many seconds. If you have many domain names, the default of 500 seconds may be too long.
     required: false
     default: 500
-    aliases: []
   private_zone:
     description:
       - If set to true, the private zone matching the requested name within the domain will be used if there are both public and private zones. The default is to use the public zone.
@@ -101,9 +93,9 @@ options:
     version_added: "1.9"
   identifier:
     description:
-      - Weighted and latency-based resource record sets only. An identifier
+      - Have to be specified for Weighted, latency-based and failover resource record sets only. An identifier
         that differentiates among multiple resource record sets that have the
-        same combination of DNS name and type.
+        same combination of DNS name and type. 
     required: false
     default: null
     version_added: "2.0"
@@ -134,27 +126,39 @@ options:
   failover:
     description:
       - Failover resource record sets only. Whether this is the primary or
-        secondary resource record set.
+        secondary resource record set. Allowed values are PRIMARY and SECONDARY
     required: false
     default: null
     version_added: "2.0"
   vpc_id:
     description:
-      - When used in conjunction with private_zone: true, this will only modify
-        records in the private hosted zone attached to this VPC. This allows you
-        to have multiple private hosted zones, all with the same name, attached
-        to different VPCs.
+      - "When used in conjunction with private_zone: true, this will only modify records in the private hosted zone attached to this VPC."
+      - This allows you to have multiple private hosted zones, all with the same name, attached to different VPCs.
     required: false
     default: null
     version_added: "2.0"
-author: "Bruce Pennypacker (@bpennypacker)"
+  wait:
+    description:
+      - Wait until the changes have been replicated to all Amazon Route 53 DNS servers.
+    required: false
+    default: no
+    version_added: "2.1"
+  wait_timeout:
+    description:
+      - How long to wait for the changes to be replicated, in seconds.
+    required: false
+    default: 300
+    version_added: "2.1"
+author:
+  - "Bruce Pennypacker (@bpennypacker)"
+  - "Mike Buzzetti <mike.buzzetti@gmail.com>"
 extends_documentation_fragment: aws
 '''
 
 # FIXME: the command stuff should have a more state like configuration alias -- MPD
 
 EXAMPLES = '''
-# Add new.foo.com as an A record with 3 IPs
+# Add new.foo.com as an A record with 3 IPs and wait until the changes have been replicated
 - route53:
       command: create
       zone: foo.com
@@ -162,6 +166,7 @@ EXAMPLES = '''
       type: A
       ttl: 7200
       value: 1.1.1.1,2.2.2.2,3.3.3.3
+      wait: yes
 
 # Retrieve the details for new.foo.com
 - route53:
@@ -210,28 +215,39 @@ EXAMPLES = '''
       alias=True
       alias_hosted_zone_id="{{ elb_zone_id }}"
 
+# Add an alias record that points to an Amazon ELB and evaluates it health:
+- route53:
+      command=create
+      zone=foo.com
+      record=elb.foo.com
+      type=A
+      value="{{ elb_dns_name }}"
+      alias=True
+      alias_hosted_zone_id="{{ elb_zone_id }}"
+      alias_evaluate_target_health=True
+
 # Add an AAAA record with Hosted Zone ID.  Note that because there are colons in the value
 # that the entire parameter list must be quoted:
 - route53:
       command: "create"
       zone: "foo.com"
-      hostes_zone_id: "Z2AABBCCDDEEFF"
+      hosted_zone_id: "Z2AABBCCDDEEFF"
       record: "localhost.foo.com"
       type: "AAAA"
       ttl: "7200"
       value: "::1"
-      
+
 # Add an AAAA record with Hosted Zone ID.  Note that because there are colons in the value
 # that the entire parameter list must be quoted:
 - route53:
       command: "create"
       zone: "foo.com"
-      hostes_zone_id: "Z2AABBCCDDEEFF"
+      hosted_zone_id: "Z2AABBCCDDEEFF"
       record: "localhost.foo.com"
       type: "AAAA"
       ttl: "7200"
       value: "::1"
-      
+
 # Use a routing policy to distribute traffic:
 - route53:
       command: "create"
@@ -247,7 +263,12 @@ EXAMPLES = '''
 
 '''
 
+MINIMUM_BOTO_VERSION = '2.28.0'
+WAIT_RETRY_SLEEP = 5  # how many seconds to wait between propagation status polls
+
+
 import time
+import distutils.version
 
 try:
     import boto
@@ -255,9 +276,15 @@ try:
     from boto import route53
     from boto.route53 import Route53Connection
     from boto.route53.record import Record, ResourceRecordSets
+    from boto.route53.status import Status
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
+
+
+class TimeoutError(Exception):
+    pass
+
 
 def get_zone_by_name(conn, module, zone_name, want_private, zone_id, want_vpc_id):
     """Finds a zone by name or zone_id"""
@@ -282,13 +309,15 @@ def get_zone_by_name(conn, module, zone_name, want_private, zone_id, want_vpc_id
     return None
 
 
-def commit(changes, retry_interval):
+def commit(changes, retry_interval, wait, wait_timeout):
     """Commit changes, but retry PriorRequestNotComplete errors."""
+    result = None
     retry = 10
     while True:
         try:
             retry -= 1
-            return changes.commit()
+            result = changes.commit()
+            break
         except boto.route53.exception.DNSServerError, e:
             code = e.body.split("<Code>")[1]
             code = code.split("</Code>")[0]
@@ -296,27 +325,57 @@ def commit(changes, retry_interval):
                 raise e
             time.sleep(float(retry_interval))
 
+    if wait:
+      timeout_time = time.time() + wait_timeout
+      connection = changes.connection
+      change = result['ChangeResourceRecordSetsResponse']['ChangeInfo']
+      status = Status(connection, change)
+      while status.status != 'INSYNC' and time.time() < timeout_time:
+        time.sleep(WAIT_RETRY_SLEEP)
+        status.update()
+      if time.time() >= timeout_time:
+        raise TimeoutError()
+    return result
+
+# Shamelessly copied over from https://git.io/vgmDG
+IGNORE_CODE = 'Throttling'
+MAX_RETRIES=5
+def invoke_with_throttling_retries(function_ref, *argv):
+    retries=0
+    while True:
+        try:
+            retval=function_ref(*argv)
+            return retval
+        except boto.exception.BotoServerError, e:
+            if e.code != IGNORE_CODE or retries==MAX_RETRIES:
+                raise e
+        time.sleep(5 * (2**retries))
+        retries += 1
+
 def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(dict(
-            command              = dict(choices=['get', 'create', 'delete'], required=True),
-            zone                 = dict(required=True),
-            hosted_zone_id       = dict(required=False, default=None),
-            record               = dict(required=True),
-            ttl                  = dict(required=False, type='int', default=3600),
-            type                 = dict(choices=['A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS'], required=True),
-            alias                = dict(required=False, type='bool'),
-            alias_hosted_zone_id = dict(required=False),
-            value                = dict(required=False),
-            overwrite            = dict(required=False, type='bool'),
-            retry_interval       = dict(required=False, default=500),
-            private_zone         = dict(required=False, type='bool', default=False),
-            identifier           = dict(required=False),
-            weight               = dict(required=False, type='int'),
-            region               = dict(required=False),
-            health_check         = dict(required=False),
-            failover             = dict(required=False),
-            vpc_id               = dict(required=False),
+            command                      = dict(choices=['get', 'create', 'delete'], required=True),
+            zone                         = dict(required=True),
+            hosted_zone_id               = dict(required=False, default=None),
+            record                       = dict(required=True),
+            ttl                          = dict(required=False, type='int', default=3600),
+            type                         = dict(choices=['A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS', 'SOA'], required=True),
+            alias                        = dict(required=False, type='bool'),
+            alias_hosted_zone_id         = dict(required=False),
+            alias_evaluate_target_health = dict(required=False, type='bool', default=False),
+            value                        = dict(required=False),
+            overwrite                    = dict(required=False, type='bool'),
+            retry_interval               = dict(required=False, default=500),
+            private_zone                 = dict(required=False, type='bool', default=False),
+            identifier                   = dict(required=False, default=None),
+            weight                       = dict(required=False, type='int'),
+            region                       = dict(required=False),
+            health_check                 = dict(required=False),
+            failover                     = dict(required=False,choices=['PRIMARY','SECONDARY']),
+            vpc_id                       = dict(required=False),
+            wait                         = dict(required=False, type='bool', default=False),
+            wait_timeout                 = dict(required=False, type='int', default=300),
         )
     )
     module = AnsibleModule(argument_spec=argument_spec)
@@ -324,23 +383,29 @@ def main():
     if not HAS_BOTO:
         module.fail_json(msg='boto required for this module')
 
-    command_in              = module.params.get('command')
-    zone_in                 = module.params.get('zone').lower()
-    hosted_zone_id_in       = module.params.get('hosted_zone_id')
-    ttl_in                  = module.params.get('ttl')
-    record_in               = module.params.get('record').lower()
-    type_in                 = module.params.get('type')
-    value_in                = module.params.get('value')
-    alias_in                = module.params.get('alias')
-    alias_hosted_zone_id_in = module.params.get('alias_hosted_zone_id')
-    retry_interval_in       = module.params.get('retry_interval')
-    private_zone_in         = module.params.get('private_zone')
-    identifier_in           = module.params.get('identifier')
-    weight_in               = module.params.get('weight')
-    region_in               = module.params.get('region')
-    health_check_in         = module.params.get('health_check')
-    failover_in             = module.params.get('failover')
-    vpc_id_in               = module.params.get('vpc_id')
+    if distutils.version.StrictVersion(boto.__version__) < distutils.version.StrictVersion(MINIMUM_BOTO_VERSION):
+        module.fail_json(msg='Found boto in version %s, but >= %s is required' % (boto.__version__, MINIMUM_BOTO_VERSION))
+
+    command_in                      = module.params.get('command')
+    zone_in                         = module.params.get('zone').lower()
+    hosted_zone_id_in               = module.params.get('hosted_zone_id')
+    ttl_in                          = module.params.get('ttl')
+    record_in                       = module.params.get('record').lower()
+    type_in                         = module.params.get('type')
+    value_in                        = module.params.get('value')
+    alias_in                        = module.params.get('alias')
+    alias_hosted_zone_id_in         = module.params.get('alias_hosted_zone_id')
+    alias_evaluate_target_health_in = module.params.get('alias_evaluate_target_health')
+    retry_interval_in               = module.params.get('retry_interval')
+    private_zone_in                 = module.params.get('private_zone')
+    identifier_in                   = module.params.get('identifier')
+    weight_in                       = module.params.get('weight')
+    region_in                       = module.params.get('region')
+    health_check_in                 = module.params.get('health_check')
+    failover_in                     = module.params.get('failover')
+    vpc_id_in                       = module.params.get('vpc_id')
+    wait_in                         = module.params.get('wait')
+    wait_timeout_in                 = module.params.get('wait_timeout')
 
     region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
 
@@ -366,13 +431,23 @@ def main():
               module.fail_json(msg = "parameter 'value' must contain a single dns name for alias create/delete")
           elif not alias_hosted_zone_id_in:
               module.fail_json(msg = "parameter 'alias_hosted_zone_id' required for alias create/delete")
+	elif ( weight_in!=None or region_in!=None or failover_in!=None ) and identifier_in==None:
+	  module.fail_json(msg= "If you specify failover, region or weight you must also specify identifier")
+
+    if command_in == 'create':
+        if ( weight_in!=None or region_in!=None or failover_in!=None ) and identifier_in==None:
+          module.fail_json(msg= "If you specify failover, region or weight you must also specify identifier")
+        elif  ( weight_in==None and region_in==None and failover_in==None ) and identifier_in!=None:
+          module.fail_json(msg= "You have specified identifier which makes sense only if you specify one of: weight, region or failover.")
+        
+
 
     if vpc_id_in and not private_zone_in:
         module.fail_json(msg="parameter 'private_zone' must be true when specifying parameter"
             " 'vpc_id'")
 
 
-    # connect to the route53 endpoint 
+    # connect to the route53 endpoint
     try:
         conn = Route53Connection(**aws_connect_kwargs)
     except boto.exception.BotoServerError, e:
@@ -387,14 +462,14 @@ def main():
         module.fail_json(msg = errmsg)
 
     record = {}
-    
+
     found_record = False
     wanted_rset = Record(name=record_in, type=type_in, ttl=ttl_in,
         identifier=identifier_in, weight=weight_in, region=region_in,
         health_check=health_check_in, failover=failover_in)
     for v in value_list:
         if alias_in:
-            wanted_rset.set_alias(alias_hosted_zone_id_in, v)
+            wanted_rset.set_alias(alias_hosted_zone_id_in, v, alias_evaluate_target_health_in)
         else:
             wanted_rset.add_value(v)
 
@@ -404,7 +479,12 @@ def main():
         # tripping of things like * and @.
         decoded_name = rset.name.replace(r'\052', '*')
         decoded_name = decoded_name.replace(r'\100', '@')
+        #Need to save this changes in rset, because of comparing rset.to_xml() == wanted_rset.to_xml() in next block
+        rset.name = decoded_name
 
+        if identifier_in is not None:
+            identifier_in = str(identifier_in)
+	
         if rset.type == type_in and decoded_name.lower() == record_in.lower() and rset.identifier == identifier_in:
             found_record = True
             record['zone'] = zone_in
@@ -427,6 +507,7 @@ def main():
               record['value'] = rset.alias_dns_name
               record['values'] = [rset.alias_dns_name]
               record['alias_hosted_zone_id'] = rset.alias_hosted_zone_id
+              record['alias_evaluate_target_health'] = rset.alias_evaluate_target_health
             else:
               record['alias'] = False
               record['value'] = ','.join(sorted(rset.resource_records))
@@ -459,11 +540,16 @@ def main():
         changes.add_change_record(command, wanted_rset)
 
     try:
-        result = commit(changes, retry_interval_in)
+        result = invoke_with_throttling_retries(commit, changes, retry_interval_in, wait_in, wait_timeout_in)
     except boto.route53.exception.DNSServerError, e:
         txt = e.body.split("<Message>")[1]
         txt = txt.split("</Message>")[0]
-        module.fail_json(msg = txt)
+        if "but it already exists" in txt:
+                module.exit_json(changed=False)
+        else:   
+                module.fail_json(msg = txt)
+    except TimeoutError:
+        module.fail_json(msg='Timeout waiting for changes to replicate')
 
     module.exit_json(changed=True)
 

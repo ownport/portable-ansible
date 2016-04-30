@@ -99,6 +99,12 @@ options:
       - Name of the project the firewall rule is related to.
     required: false
     default: null
+  zone:
+    description:
+      - Name of the zone in which the virtual machine is in.
+      - If not set, default zone is used.
+    required: false
+    default: null
   poll_async:
     description:
       - Poll async jobs until job has finished.
@@ -152,6 +158,11 @@ EXAMPLES = '''
 
 RETURN = '''
 ---
+id:
+  description: UUID of the rule.
+  returned: success
+  type: string
+  sample: 04589590-ac63-4ffc-93f5-b698b8ac38b6
 ip_address:
   description: IP address of the rule if C(type=ingress)
   returned: success
@@ -212,14 +223,18 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackFirewall(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackFirewall, self).__init__(module)
+        self.returns = {
+            'cidrlist':     'cidr',
+            'startport':    'start_port',
+            'endpoint':     'end_port',
+            'protocol':     'protocol',
+            'ipaddress':    'ip_address',
+            'icmpcode':     'icmp_code',
+            'icmptype':     'icmp_type',
+        }
         self.firewall_rule = None
-
-
-    def get_end_port(self):
-        if self.module.params.get('end_port'):
-            return self.module.params.get('end_port')
-        return self.module.params.get('start_port')
+        self.network = None
 
 
     def get_firewall_rule(self):
@@ -227,7 +242,7 @@ class AnsibleCloudStackFirewall(AnsibleCloudStack):
             cidr        = self.module.params.get('cidr')
             protocol    = self.module.params.get('protocol')
             start_port  = self.module.params.get('start_port')
-            end_port    = self.get_end_port()
+            end_port    = self.get_or_fallback('end_port', 'start_port')
             icmp_code   = self.module.params.get('icmp_code')
             icmp_type   = self.module.params.get('icmp_type')
             fw_type     = self.module.params.get('type')
@@ -295,10 +310,11 @@ class AnsibleCloudStackFirewall(AnsibleCloudStack):
         return cidr == rule['cidrlist']
 
 
-    def get_network(self, key=None, network=None):
-        if not network:
-            network = self.module.params.get('network')
+    def get_network(self, key=None):
+        if self.network:
+            return self._get_by_key(key, self.network)
 
+        network = self.module.params.get('network')
         if not network:
             return None
 
@@ -314,6 +330,7 @@ class AnsibleCloudStackFirewall(AnsibleCloudStack):
 
         for n in networks['network']:
             if network in [ n['displaytext'], n['name'], n['id'] ]:
+                self.network = n
                 return self._get_by_key(key, n)
                 break
         self.module.fail_json(msg="Network '%s' not found" % network)
@@ -328,7 +345,7 @@ class AnsibleCloudStackFirewall(AnsibleCloudStack):
             args['cidrlist']    = self.module.params.get('cidr')
             args['protocol']    = self.module.params.get('protocol')
             args['startport']   = self.module.params.get('start_port')
-            args['endport']     = self.get_end_port()
+            args['endport']     = self.get_or_fallback('end_port', 'start_port')
             args['icmptype']    = self.module.params.get('icmp_type')
             args['icmpcode']    = self.module.params.get('icmp_code')
 
@@ -375,56 +392,44 @@ class AnsibleCloudStackFirewall(AnsibleCloudStack):
 
 
     def get_result(self, firewall_rule):
+        super(AnsibleCloudStackFirewall, self).get_result(firewall_rule)
         if firewall_rule:
             self.result['type'] = self.module.params.get('type')
-            if 'cidrlist' in firewall_rule:
-                self.result['cidr'] = firewall_rule['cidrlist']
-            if 'startport' in firewall_rule:
-                self.result['start_port'] = int(firewall_rule['startport'])
-            if 'endport' in firewall_rule:
-                self.result['end_port'] = int(firewall_rule['endport'])
-            if 'protocol' in firewall_rule:
-                self.result['protocol'] = firewall_rule['protocol']
-            if 'ipaddress' in firewall_rule:
-                self.result['ip_address'] = firewall_rule['ipaddress']
-            if 'icmpcode' in firewall_rule:
-                self.result['icmp_code'] = int(firewall_rule['icmpcode'])
-            if 'icmptype' in firewall_rule:
-                self.result['icmp_type'] = int(firewall_rule['icmptype'])
-            if 'networkid' in firewall_rule:
-                self.result['network'] = self.get_network(key='displaytext', network=firewall_rule['networkid'])
+            if self.result['type'] == 'egress':
+                self.result['network'] = self.get_network(key='displaytext')
         return self.result
 
 
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        ip_address = dict(default=None),
+        network = dict(default=None),
+        cidr = dict(default='0.0.0.0/0'),
+        protocol = dict(choices=['tcp', 'udp', 'icmp', 'all'], default='tcp'),
+        type = dict(choices=['ingress', 'egress'], default='ingress'),
+        icmp_type = dict(type='int', default=None),
+        icmp_code = dict(type='int', default=None),
+        start_port = dict(type='int', aliases=['port'], default=None),
+        end_port = dict(type='int', default=None),
+        state = dict(choices=['present', 'absent'], default='present'),
+        zone = dict(default=None),
+        domain = dict(default=None),
+        account = dict(default=None),
+        project = dict(default=None),
+        poll_async = dict(type='bool', default=True),
+    ))
+
+    required_together = cs_required_together()
+    required_together.extend([
+        ['icmp_type', 'icmp_code'],
+    ])
+
     module = AnsibleModule(
-        argument_spec = dict(
-            ip_address = dict(default=None),
-            network = dict(default=None),
-            cidr = dict(default='0.0.0.0/0'),
-            protocol = dict(choices=['tcp', 'udp', 'icmp', 'all'], default='tcp'),
-            type = dict(choices=['ingress', 'egress'], default='ingress'),
-            icmp_type = dict(type='int', default=None),
-            icmp_code = dict(type='int', default=None),
-            start_port = dict(type='int', aliases=['port'], default=None),
-            end_port = dict(type='int', default=None),
-            state = dict(choices=['present', 'absent'], default='present'),
-            domain = dict(default=None),
-            account = dict(default=None),
-            project = dict(default=None),
-            poll_async = dict(choices=BOOLEANS, default=True),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
+        argument_spec=argument_spec,
+        required_together=required_together,
         required_one_of = (
             ['ip_address', 'network'],
-        ),
-        required_together = (
-            ['icmp_type', 'icmp_code'],
-            ['api_key', 'api_secret', 'api_url'],
         ),
         mutually_exclusive = (
             ['icmp_type', 'start_port'],
@@ -448,7 +453,7 @@ def main():
 
         result = acs_fw.get_result(fw_rule)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

@@ -58,36 +58,80 @@ options:
       - Use the mirror's index file instead of the CPAN Meta DB
     required: false
     default: false
-examples:
-   - code: "cpanm: name=Dancer"
-     description: Install I(Dancer) perl package.
-   - code: "cpanm: name=MIYAGAWA/Plack-0.99_05.tar.gz"
-     description: Install version 0.99_05 of the I(Plack) perl package.
-   - code: "cpanm: name=Dancer locallib=/srv/webapps/my_app/extlib"
-     description: "Install I(Dancer) (U(http://perldancer.org/)) into the specified I(locallib)"
-   - code: "cpanm: from_path=/srv/webapps/my_app/src/"
-     description: Install perl dependencies from local directory.
-   - code: "cpanm: name=Dancer notest=True locallib=/srv/webapps/my_app/extlib"
-     description: Install I(Dancer) perl package without running the unit tests in indicated I(locallib).
-   - code: "cpanm: name=Dancer mirror=http://cpan.cpantesters.org/"
-     description: Install I(Dancer) perl package from a specific mirror
+  installdeps:
+    description:
+      - Only install dependencies
+    required: false
+    default: false
+    version_added: "2.0"
+  version:
+    description:
+      - minimum version of perl module to consider acceptable
+    required: false
+    default: false
+    version_added: "2.1"
+  system_lib:
+    description:
+     -  Use this if you want to install modules to the system perl include path. You must be root or have "passwordless" sudo for this to work.
+     -  This uses the cpanm commandline option '--sudo', which has nothing to do with ansible privilege escalation.
+    required: false
+    default: false
+    version_added: "2.0"
+    aliases: ['use_sudo']
+  executable:
+    description:
+      - Override the path to the cpanm executable
+    required: false
+    default: null
+    version_added: "2.1"
 notes:
    - Please note that U(http://search.cpan.org/dist/App-cpanminus/bin/cpanm, cpanm) must be installed on the remote host.
 author: "Franck Cuny (@franckcuny)"
 '''
 
-def _is_package_installed(module, name, locallib, cpanm):
+EXAMPLES = '''
+# install Dancer perl package
+- cpanm: name=Dancer
+
+# install version 0.99_05 of the Plack perl package
+- cpanm: name=MIYAGAWA/Plack-0.99_05.tar.gz
+
+# install Dancer into the specified locallib
+- cpanm: name=Dancer locallib=/srv/webapps/my_app/extlib
+
+# install perl dependencies from local directory
+- cpanm: from_path=/srv/webapps/my_app/src/
+
+# install Dancer perl package without running the unit tests in indicated locallib
+- cpanm: name=Dancer notest=True locallib=/srv/webapps/my_app/extlib
+
+# install Dancer perl package from a specific mirror
+- cpanm: name=Dancer mirror=http://cpan.cpantesters.org/
+
+# install Dancer perl package into the system root path
+- cpanm: name=Dancer system_lib=yes
+
+# install Dancer if it's not already installed
+# OR the installed version is older than version 1.0
+- cpanm: name=Dancer version=1.0
+'''
+
+def _is_package_installed(module, name, locallib, cpanm, version):
     cmd = ""
     if locallib:
         os.environ["PERL5LIB"] = "%s/lib/perl5" % locallib
-    cmd = "%s perl -M%s -e '1'" % (cmd, name)
+    cmd = "%s perl -e ' use %s" % (cmd, name)
+    if version:
+       cmd = "%s %s;'" % (cmd, version)
+    else:
+       cmd = "%s;'" % cmd
     res, stdout, stderr = module.run_command(cmd, check_rc=False)
     if res == 0:
        return True
-    else: 
+    else:
        return False
 
-def _build_cmd_line(name, from_path, notest, locallib, mirror, mirror_only, cpanm):
+def _build_cmd_line(name, from_path, notest, locallib, mirror, mirror_only, installdeps, cpanm, use_sudo):
     # this code should use "%s" like everything else and just return early but not fixing all of it now.
     # don't copy stuff like this
     if from_path:
@@ -107,17 +151,34 @@ def _build_cmd_line(name, from_path, notest, locallib, mirror, mirror_only, cpan
     if mirror_only is True:
         cmd = "{cmd} --mirror-only".format(cmd=cmd)
 
+    if installdeps is True:
+        cmd = "{cmd} --installdeps".format(cmd=cmd)
+
+    if use_sudo is True:
+        cmd = "{cmd} --sudo".format(cmd=cmd)
+
     return cmd
+
+
+def _get_cpanm_path(module):
+    if module.params['executable']:
+        return module.params['executable']
+    else:
+        return module.get_bin_path('cpanm', True)
 
 
 def main():
     arg_spec = dict(
         name=dict(default=None, required=False, aliases=['pkg']),
-        from_path=dict(default=None, required=False),
+        from_path=dict(default=None, required=False, type='path'),
         notest=dict(default=False, type='bool'),
-        locallib=dict(default=None, required=False),
+        locallib=dict(default=None, required=False, type='path'),
         mirror=dict(default=None, required=False),
         mirror_only=dict(default=False, type='bool'),
+        installdeps=dict(default=False, type='bool'),
+        system_lib=dict(default=False, type='bool', aliases=['use_sudo']),
+        version=dict(default=None, required=False),
+        executable=dict(required=False, type='path'),
     )
 
     module = AnsibleModule(
@@ -125,28 +186,30 @@ def main():
         required_one_of=[['name', 'from_path']],
     )
 
-    cpanm       = module.get_bin_path('cpanm', True)
+    cpanm       = _get_cpanm_path(module)
     name        = module.params['name']
     from_path   = module.params['from_path']
     notest      = module.boolean(module.params.get('notest', False))
     locallib    = module.params['locallib']
     mirror      = module.params['mirror']
     mirror_only = module.params['mirror_only']
+    installdeps = module.params['installdeps']
+    use_sudo    = module.params['system_lib']
+    version     = module.params['version']
 
     changed   = False
 
-    installed = _is_package_installed(module, name, locallib, cpanm)
+    installed = _is_package_installed(module, name, locallib, cpanm, version)
 
     if not installed:
-        out_cpanm = err_cpanm = ''
-        cmd       = _build_cmd_line(name, from_path, notest, locallib, mirror, mirror_only, cpanm)
+        cmd       = _build_cmd_line(name, from_path, notest, locallib, mirror, mirror_only, installdeps, cpanm, use_sudo)
 
         rc_cpanm, out_cpanm, err_cpanm = module.run_command(cmd, check_rc=False)
 
         if rc_cpanm != 0:
             module.fail_json(msg=err_cpanm, cmd=cmd)
 
-        if err_cpanm and 'is up to date' not in err_cpanm:
+        if (err_cpanm.find('is up to date') == -1 and out_cpanm.find('is up to date') == -1):
             changed = True
 
     module.exit_json(changed=changed, binary=cpanm, name=name)

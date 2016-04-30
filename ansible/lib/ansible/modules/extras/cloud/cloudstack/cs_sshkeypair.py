@@ -77,6 +77,11 @@ EXAMPLES = '''
 
 RETURN = '''
 ---
+id:
+  description: UUID of the SSH public key.
+  returned: success
+  type: string
+  sample: a6f7a5fc-43f8-11e5-a151-feff819cdc9f
 name:
   description: Name of the SSH public key.
   returned: success
@@ -112,7 +117,11 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackSshKey(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackSshKey, self).__init__(module)
+        self.returns = {
+            'privatekey':   'private_key',
+            'fingerprint':  'fingerprint',
+        }
         self.ssh_key = None
 
 
@@ -189,16 +198,6 @@ class AnsibleCloudStackSshKey(AnsibleCloudStack):
         return self.ssh_key
 
 
-    def get_result(self, ssh_key):
-        if ssh_key:
-            if 'fingerprint' in ssh_key:
-                self.result['fingerprint'] = ssh_key['fingerprint']
-            if 'name' in ssh_key:
-                self.result['name'] = ssh_key['name']
-            if 'privatekey' in ssh_key:
-                self.result['private_key'] = ssh_key['privatekey']
-        return self.result
-
 
     def _get_ssh_fingerprint(self, public_key):
         key = sshpubkeys.SSHKey(public_key)
@@ -206,23 +205,19 @@ class AnsibleCloudStackSshKey(AnsibleCloudStack):
 
 
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        public_key = dict(default=None),
+        domain = dict(default=None),
+        account = dict(default=None),
+        project = dict(default=None),
+        state = dict(choices=['present', 'absent'], default='present'),
+    ))
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            public_key = dict(default=None),
-            domain = dict(default=None),
-            account = dict(default=None),
-            project = dict(default=None),
-            state = dict(choices=['present', 'absent'], default='present'),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-        ),
+        argument_spec=argument_spec,
+        required_together=cs_required_together(),
         supports_check_mode=True
     )
 
@@ -246,7 +241,7 @@ def main():
 
         result = acs_sshkey.get_result(ssh_key)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

@@ -59,12 +59,24 @@ EXAMPLES = '''
 - rabbitmq_plugin: names=rabbitmq_management state=enabled
 '''
 
+import os
+
 class RabbitMqPlugins(object):
     def __init__(self, module):
         self.module = module
 
         if module.params['prefix']:
-            self._rabbitmq_plugins = module.params['prefix'] + "/sbin/rabbitmq-plugins"
+            if os.path.isdir(os.path.join(module.params['prefix'], 'bin')):
+                bin_path = os.path.join(module.params['prefix'], 'bin')
+            elif os.path.isdir(os.path.join(module.params['prefix'], 'sbin')):
+                bin_path = os.path.join(module.params['prefix'], 'sbin')
+            else:
+                # No such path exists.
+                raise Exception("No binary folder in prefix %s" %
+                        module.params['prefix'])
+
+            self._rabbitmq_plugins = bin_path + "/rabbitmq-plugins"
+
         else:
             self._rabbitmq_plugins = module.get_bin_path('rabbitmq-plugins', True)
 
@@ -76,13 +88,21 @@ class RabbitMqPlugins(object):
         return list()
 
     def get_all(self):
-        return self._exec(['list', '-E', '-m'], True)
+        list_output = self._exec(['list', '-E', '-m'], True)
+        plugins = []
+        for plugin in list_output:
+            if not plugin:
+                break
+            plugins.append(plugin)
+
+        return plugins
 
     def enable(self, name):
         self._exec(['enable', name])
 
     def disable(self, name):
         self._exec(['disable', name])
+
 
 def main():
     arg_spec = dict(

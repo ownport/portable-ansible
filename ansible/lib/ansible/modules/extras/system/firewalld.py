@@ -47,16 +47,23 @@ options:
     required: false
     default: null
     version_added: "2.0"
+  interface:
+    description:
+      - 'The interface you would like to add/remove to/from a zone in firewalld'
+    required: false
+    default: null
+    version_added: "2.1"
   zone:
     description:
       - 'The firewalld zone to add/remove to/from (NOTE: default zone can be configured per system but "public" is default from upstream. Available choices can be extended based on per-system configs, listed here are "out of the box" defaults).'
     required: false
     default: system-default(public)
-    choices: [ "work", "drop", "internal", "external", "trusted", "home", "dmz", "public", "block"]
+    choices: [ "work", "drop", "internal", "external", "trusted", "home", "dmz", "public", "block" ]
   permanent:
     description:
       - "Should this configuration be in the running firewalld configuration or persist across reboots."
-    required: true
+    required: false
+    default: null
   immediate:
     description:
       - "Should this configuration be applied immediately, if set as permanent"
@@ -67,15 +74,23 @@ options:
     description:
       - "Should this port accept(enabled) or reject(disabled) connections."
     required: true
+    choices: [ "enabled", "disabled" ]
   timeout:
     description:
       - "The amount of time the rule should be in effect for when non-permanent."
     required: false
     default: 0
+  masquerade:
+    description:
+      - 'The masquerade setting you would like to enable/disable to/from zones within firewalld'
+    required: false
+    default: null
+    version_added: "2.1"
 notes:
   - Not tested on any Debian based system.
+  - Requires the python2 bindings of firewalld, who may not be installed by default if the distribution switched to python 3 
 requirements: [ 'firewalld >= 0.2.11' ]
-author: "Adam Miller (@maxamillion)" 
+author: "Adam Miller (@maxamillion)"
 '''
 
 EXAMPLES = '''
@@ -85,6 +100,8 @@ EXAMPLES = '''
 - firewalld: zone=dmz service=http permanent=true state=enabled
 - firewalld: rich_rule='rule service name="ftp" audit limit value="1/m" accept' permanent=true state=enabled
 - firewalld: source='192.168.1.0/24' zone=internal state=enabled
+- firewalld: zone=trusted interface=eth2 permanent=true state=enabled
+- firewalld: masquerade=yes state=enabled permanent=true zone=dmz
 '''
 
 import os
@@ -94,11 +111,45 @@ try:
     import firewall.config
     FW_VERSION = firewall.config.VERSION
 
+    from firewall.client import Rich_Rule
     from firewall.client import FirewallClient
     fw = FirewallClient()
-    HAS_FIREWALLD = True
+    if not fw.connected:
+        HAS_FIREWALLD = False
+    else:
+        HAS_FIREWALLD = True
 except ImportError:
     HAS_FIREWALLD = False
+
+
+#####################
+# masquerade handling
+#
+def get_masquerade_enabled(zone):
+    if fw.queryMasquerade(zone) == True:
+        return True
+    else:
+        return False
+
+def get_masquerade_enabled_permanent(zone):
+    fw_zone = fw.config().getZoneByName(zone)
+    fw_settings = fw_zone.getSettings()
+    if fw_settings.getMasquerade() == True:
+        return True
+    else:
+        return False
+    
+def set_masquerade_enabled(zone):
+    fw.addMasquerade(zone)
+
+def set_masquerade_disabled(zone):
+    fw.removeMasquerade(zone)
+
+def set_masquerade_permanent(zone, masquerade):
+    fw_zone = fw.config().getZoneByName(zone)
+    fw_settings = fw_zone.getSettings()
+    fw_settings.setMasquerade(masquerade)
+    fw_zone.update(fw_settings)
 
 ################
 # port handling
@@ -137,7 +188,7 @@ def set_port_disabled_permanent(zone, port, protocol):
 
 ####################
 # source handling
-#    
+#
 def get_source(zone, source):
     fw_zone = fw.config().getZoneByName(zone)
     fw_settings = fw_zone.getSettings()
@@ -150,11 +201,36 @@ def add_source(zone, source):
     fw_zone = fw.config().getZoneByName(zone)
     fw_settings = fw_zone.getSettings()
     fw_settings.addSource(source)
+    fw_zone.update(fw_settings)
 
 def remove_source(zone, source):
     fw_zone = fw.config().getZoneByName(zone)
     fw_settings = fw_zone.getSettings()
     fw_settings.removeSource(source)
+    fw_zone.update(fw_settings)
+
+####################
+# interface handling
+#
+def get_interface(zone, interface):
+    fw_zone = fw.config().getZoneByName(zone)
+    fw_settings = fw_zone.getSettings()
+    if interface in fw_settings.getInterfaces():
+       return True
+    else:
+        return False
+
+def add_interface(zone, interface):
+    fw_zone = fw.config().getZoneByName(zone)
+    fw_settings = fw_zone.getSettings()
+    fw_settings.addInterface(interface)
+    fw_zone.update(fw_settings)
+
+def remove_interface(zone, interface):
+    fw_zone = fw.config().getZoneByName(zone)
+    fw_settings = fw_zone.getSettings()
+    fw_settings.removeInterface(interface)
+    fw_zone.update(fw_settings)
 
 ####################
 # service handling
@@ -190,12 +266,15 @@ def set_service_disabled_permanent(zone, service):
     fw_settings = fw_zone.getSettings()
     fw_settings.removeService(service)
     fw_zone.update(fw_settings)
-    
+
 
 ####################
 # rich rule handling
 #
 def get_rich_rule_enabled(zone, rule):
+    # Convert the rule string to standard format
+    # before checking whether it is present
+    rule = str(Rich_Rule(rule_str=rule))
     if rule in fw.getRichRules(zone):
         return True
     else:
@@ -210,6 +289,9 @@ def set_rich_rule_disabled(zone, rule):
 def get_rich_rule_enabled_permanent(zone, rule):
     fw_zone = fw.config().getZoneByName(zone)
     fw_settings = fw_zone.getSettings()
+    # Convert the rule string to standard format
+    # before checking whether it is present
+    rule = str(Rich_Rule(rule_str=rule))
     if rule in fw_settings.getRichRules():
         return True
     else:
@@ -241,14 +323,19 @@ def main():
             permanent=dict(type='bool',required=False,default=None),
             state=dict(choices=['enabled', 'disabled'], required=True),
             timeout=dict(type='int',required=False,default=0),
+            interface=dict(required=False,default=None),
+            masquerade=dict(required=False,default=None),
         ),
         supports_check_mode=True
     )
     if module.params['source'] == None and module.params['permanent'] == None:
-        module.fail(msg='permanent is a required parameter')
+        module.fail_json(msg='permanent is a required parameter')
+
+    if module.params['interface'] != None and module.params['zone'] == None:
+        module.fail(msg='zone is a required parameter')
 
     if not HAS_FIREWALLD:
-        module.fail_json(msg='firewalld required for this module')
+        module.fail_json(msg='firewalld and its python 2 module are required for this module')
 
     ## Pre-run version checking
     if FW_VERSION < "0.2.11":
@@ -277,6 +364,8 @@ def main():
     desired_state = module.params['state']
     immediate = module.params['immediate']
     timeout = module.params['timeout']
+    interface = module.params['interface']
+    masquerade = module.params['masquerade']
 
     ## Check for firewalld running
     try:
@@ -293,9 +382,13 @@ def main():
         modification_count += 1
     if rich_rule != None:
         modification_count += 1
+    if interface != None:
+        modification_count += 1
+    if masquerade != None:
+        modification_count += 1
 
     if modification_count > 1:
-        module.fail_json(msg='can only operate on port, service or rich_rule at once')
+        module.fail_json(msg='can only operate on port, service, rich_rule or interface at once')
 
     if service != None:
         if permanent:
@@ -357,6 +450,7 @@ def main():
                 remove_source(zone, source)
                 changed=True
                 msgs.append("Removed %s from zone %s" % (source, zone))
+
     if port != None:
         if permanent:
             is_enabled = get_port_enabled_permanent(zone, [port, protocol])
@@ -439,6 +533,68 @@ def main():
 
         if changed == True:
             msgs.append("Changed rich_rule %s to %s" % (rich_rule, desired_state))
+
+    if interface != None:
+        is_enabled = get_interface(zone, interface)
+        if desired_state == "enabled":
+            if is_enabled == False:
+                if module.check_mode:
+                    module.exit_json(changed=True)
+
+                add_interface(zone, interface)
+                changed=True
+                msgs.append("Added %s to zone %s" % (interface, zone))
+        elif desired_state == "disabled":
+            if is_enabled == True:
+                if module.check_mode:
+                    module.exit_json(changed=True)
+
+                remove_interface(zone, interface)
+                changed=True
+                msgs.append("Removed %s from zone %s" % (interface, zone))
+
+    if masquerade != None:
+
+        if permanent:
+            is_enabled = get_masquerade_enabled_permanent(zone)
+            msgs.append('Permanent operation')
+            
+            if desired_state == "enabled":
+                if is_enabled == False:
+                    if module.check_mode:
+                        module.exit_json(changed=True)
+
+                    set_masquerade_permanent(zone, True)
+                    changed=True
+                    msgs.append("Added masquerade to zone %s" % (zone))
+            elif desired_state == "disabled":
+                if is_enabled == True:
+                    if module.check_mode:
+                        module.exit_json(changed=True)
+
+                    set_masquerade_permanent(zone, False)
+                    changed=True
+                    msgs.append("Removed masquerade from zone %s" % (zone))
+        if immediate or not permanent:
+            is_enabled = get_masquerade_enabled(zone)
+            msgs.append('Non-permanent operation')
+            
+            if desired_state == "enabled":
+                if is_enabled == False:
+                    if module.check_mode:
+                        module.exit_json(changed=True)
+
+                    set_masquerade_enabled(zone)
+                    changed=True
+                    msgs.append("Added masquerade to zone %s" % (zone))
+            elif desired_state == "disabled":
+                if is_enabled == True:
+                    if module.check_mode:
+                        module.exit_json(changed=True)
+
+                    set_masquerade_disabled(zone)
+                    changed=True
+                    msgs.append("Removed masquerade from zone %s" % (zone))
 
     module.exit_json(changed=changed, msg=', '.join(msgs))
 

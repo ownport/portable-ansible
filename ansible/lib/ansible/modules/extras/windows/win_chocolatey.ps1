@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-$ErrorActionPreference = "Stop"
 
 # WANT_JSON
 # POWERSHELL_COMMON
@@ -25,72 +24,26 @@ $params = Parse-Args $args;
 $result = New-Object PSObject;
 Set-Attr $result "changed" $false;
 
-If ($params.name)
+$package = Get-Attr -obj $params -name name -failifempty $true -emptyattributefailmessage "missing required argument: name"
+$force = Get-Attr -obj $params -name force -default "false" | ConvertTo-Bool
+$upgrade = Get-Attr -obj $params -name upgrade -default "false" | ConvertTo-Bool
+$version = Get-Attr -obj $params -name version -default $null
+
+$source = Get-Attr -obj $params -name source -default $null
+if ($source) {$source = $source.Tolower()}
+
+$showlog = Get-Attr -obj $params -name showlog -default "false" | ConvertTo-Bool
+$state = Get-Attr -obj $params -name state -default "present"
+
+$installargs = Get-Attr -obj $params -name install_args -default $null
+$packageparams = Get-Attr -obj $params -name params -default $null
+$ignoredependencies = Get-Attr -obj $params -name ignore_dependencies -default "false" | ConvertTo-Bool
+
+if ("present","absent" -notcontains $state)
 {
-    $package = $params.name
-}
-Else
-{
-    Fail-Json $result "missing required argument: name"
+    Fail-Json $result "state is $state; must be present or absent"
 }
 
-If ($params.force)
-{
-    $force = $params.force | ConvertTo-Bool
-}
-Else
-{
-    $force = $false
-}
-
-If ($params.upgrade)
-{
-    $upgrade = $params.upgrade | ConvertTo-Bool
-}
-Else
-{
-    $upgrade = $false
-}
-
-If ($params.version)
-{
-    $version = $params.version
-}
-Else
-{
-    $version = $null
-}
-
-If ($params.source)
-{
-    $source = $params.source.ToString().ToLower()
-}
-Else
-{
-    $source = $null
-}
-
-If ($params.showlog)
-{
-    $showlog = $params.showlog | ConvertTo-Bool
-}
-Else
-{
-    $showlog = $null
-}
-
-If ($params.state)
-{
-    $state = $params.state.ToString().ToLower()
-    If (($state -ne "present") -and ($state -ne "absent"))
-    {
-        Fail-Json $result "state is $state; must be present or absent"
-    }
-}
-Else
-{
-    $state = "present"
-}
 
 Function Chocolatey-Install-Upgrade
 {
@@ -138,7 +91,7 @@ Function Choco-IsInstalled
         Throw "Error checking installation status for $package" 
     } 
     
-    If ("$results" -match " $package .* (\d+) packages installed.")
+    If ("$results" -match "$package .* (\d+) packages installed.")
     {
         return $matches[1] -gt 0
     }
@@ -158,7 +111,13 @@ Function Choco-Upgrade
         [Parameter(Mandatory=$false, Position=3)]
         [string]$source,
         [Parameter(Mandatory=$false, Position=4)]
-        [bool]$force
+        [bool]$force,
+        [Parameter(Mandatory=$false, Position=5)]
+        [string]$installargs,
+        [Parameter(Mandatory=$false, Position=6)]
+        [string]$packageparams,
+        [Parameter(Mandatory=$false, Position=7)]
+        [bool]$ignoredependencies
     )
 
     if (-not (Choco-IsInstalled $package))
@@ -181,6 +140,21 @@ Function Choco-Upgrade
     if ($force)
     {
         $cmd += " -force"
+    }
+
+    if ($installargs)
+    {
+        $cmd += " -installargs '$installargs'"
+    }
+
+    if ($packageparams)
+    {
+        $cmd += " -params '$packageparams'"
+    }
+
+    if ($ignoredependencies)
+    {
+        $cmd += " -ignoredependencies"
     }
 
     $results = invoke-expression $cmd
@@ -215,14 +189,22 @@ Function Choco-Install
         [Parameter(Mandatory=$false, Position=4)]
         [bool]$force,
         [Parameter(Mandatory=$false, Position=5)]
-        [bool]$upgrade
+        [bool]$upgrade,
+        [Parameter(Mandatory=$false, Position=6)]
+        [string]$installargs,
+        [Parameter(Mandatory=$false, Position=7)]
+        [string]$packageparams,
+        [Parameter(Mandatory=$false, Position=8)]
+        [bool]$ignoredependencies
     )
 
     if (Choco-IsInstalled $package)
     {
         if ($upgrade)
         {
-            Choco-Upgrade -package $package -version $version -source $source -force $force
+            Choco-Upgrade -package $package -version $version -source $source -force $force `
+                -installargs $installargs -packageparams $packageparams `
+                -ignoredependencies $ignoredependencies
         }
 
         return
@@ -243,6 +225,21 @@ Function Choco-Install
     if ($force)
     {
         $cmd += " -force"
+    }
+
+    if ($installargs)
+    {
+        $cmd += " -installargs '$installargs'"
+    }
+
+    if ($packageparams)
+    {
+        $cmd += " -params '$packageparams'"
+    }
+
+    if ($ignoredependencies)
+    {
+        $cmd += " -ignoredependencies"
     }
 
     $results = invoke-expression $cmd
@@ -305,7 +302,8 @@ Try
     if ($state -eq "present")
     {
         Choco-Install -package $package -version $version -source $source `
-            -force $force -upgrade $upgrade
+            -force $force -upgrade $upgrade -installargs $installargs `
+            -packageparams $packageparams -ignoredependencies $ignoredependencies
     }
     else
     {

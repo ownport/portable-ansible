@@ -57,7 +57,8 @@ options:
     validate_certs:
         description:
             - If C(no), SSL certificates will not be validated. This should only be used
-              on personally controlled sites using self-signed certificates.
+              on personally controlled sites.  Prior to 2.0, this module would always
+              validate on python >= 2.7.9 and never validate on python <= 2.7.8
         required: false
         default: 'yes'
         choices: ['yes', 'no']
@@ -390,16 +391,13 @@ def main():
     address = fq_name(partition,host)
     port = module.params['port']
 
-    if not validate_certs:
-        disable_ssl_cert_validation()
-
     # sanity check user supplied values
 
-    if (host and not port) or (port and not host):
+    if (host and port is None) or (port is not None and not host):
         module.fail_json(msg="both host and port must be supplied")
 
-    if 1 > port > 65535:
-        module.fail_json(msg="valid ports must be in range 1 - 65535")
+    if port is not None and (0 > port or port > 65535):
+        module.fail_json(msg="valid ports must be in range 0 - 65535")
 
     if monitors:
         if len(monitors) == 1:
@@ -421,7 +419,7 @@ def main():
         module.fail_json(msg="quorum requires monitors parameter")
 
     try:
-        api = bigip_api(server, user, password)
+        api = bigip_api(server, user, password, validate_certs)
         result = {'changed': False}  # default
 
         if state == 'absent':
@@ -510,6 +508,10 @@ def main():
                     if not module.check_mode:
                         add_pool_member(api, pool, address, port)
                     result = {'changed': True}
+                if (host and port == 0) and not member_exists(api, pool, address, port):
+                    if not module.check_mode:
+                        add_pool_member(api, pool, address, port)
+                    result = {'changed': True}
 
     except Exception, e:
         module.fail_json(msg="received exception: %s" % e)
@@ -520,4 +522,3 @@ def main():
 from ansible.module_utils.basic import *
 from ansible.module_utils.f5 import *
 main()
-

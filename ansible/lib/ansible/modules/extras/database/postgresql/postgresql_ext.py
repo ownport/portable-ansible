@@ -22,7 +22,7 @@ module: postgresql_ext
 short_description: Add or remove PostgreSQL extensions from a database.
 description:
    - Add or remove PostgreSQL extensions from a database.
-version_added: "0.1"
+version_added: "1.9"
 options:
   name:
     description:
@@ -165,9 +165,9 @@ def main():
     try:
         if module.check_mode:
             if state == "absent":
-                changed = not db_exists(cursor, ext)
+                changed = not ext_exists(cursor, ext)
             elif state == "present":
-                changed = db_exists(cursor, ext)
+                changed = ext_exists(cursor, ext)
             module.exit_json(changed=changed,ext=ext)
 
         if state == "absent":

@@ -56,12 +56,12 @@ options:
      default: None
    min_disk:
      description:
-        - The minimum disk space required to deploy this image
+        - The minimum disk space (in GB) required to boot this image
      required: false
      default: None
    min_ram:
      description:
-        - The minimum ram required to deploy this image
+        - The minimum ram (in MB) required to boot this image
      required: false
      default: None
    is_public:
@@ -75,12 +75,12 @@ options:
      required: false
      default: None
    ramdisk:
-     descrption:
+     description:
         - The name of an existing ramdisk image that will be associated with this image
      required: false
      default: None
    kernel:
-     descrption:
+     description:
         - The name of an existing kernel image that will be associated with this image
      required: false
      default: None
@@ -125,13 +125,13 @@ def main():
         disk_format       = dict(default='qcow2', choices=['ami', 'ari', 'aki', 'vhd', 'vmdk', 'raw', 'qcow2', 'vdi', 'iso']),
         container_format  = dict(default='bare', choices=['ami', 'aki', 'ari', 'bare', 'ovf', 'ova']),
         owner             = dict(default=None),
-        min_disk          = dict(default=None),
-        min_ram           = dict(default=None),
-        is_public         = dict(default=False),
+        min_disk          = dict(type='int', default=0),
+        min_ram           = dict(type='int', default=0),
+        is_public         = dict(type='bool', default=False),
         filename          = dict(default=None),
         ramdisk           = dict(default=None),
         kernel            = dict(default=None),
-        properties        = dict(default={}),
+        properties        = dict(type='dict', default={}),
         state             = dict(default='present', choices=['absent', 'present']),
     )
     module_kwargs = openstack_module_kwargs()
@@ -154,7 +154,10 @@ def main():
                     disk_format=module.params['disk_format'],
                     container_format=module.params['container_format'],
                     wait=module.params['wait'],
-                    timeout=module.params['timeout']
+                    timeout=module.params['timeout'],
+                    is_public=module.params['is_public'],
+                    min_disk=module.params['min_disk'],
+                    min_ram=module.params['min_ram']
                 )
                 changed = True
                 if not module.params['wait']:
@@ -180,9 +183,11 @@ def main():
             module.exit_json(changed=changed)
 
     except shade.OpenStackCloudException as e:
-        module.fail_json(msg=e.message, extra_data=e.extra_data)
+        module.fail_json(msg=str(e), extra_data=e.extra_data)
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
 from ansible.module_utils.openstack import *
-main()
+
+if __name__ == "__main__":
+    main()

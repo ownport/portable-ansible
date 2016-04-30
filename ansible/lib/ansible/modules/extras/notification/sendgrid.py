@@ -24,33 +24,34 @@ version_added: "2.0"
 module: sendgrid
 short_description: Sends an email with the SendGrid API
 description:
-   - Sends an email with a SendGrid account through their API, not through
-     the SMTP service.
+   - "Sends an email with a SendGrid account through their API, not through
+     the SMTP service."
 notes:
-   - This module is non-idempotent because it sends an email through the
-     external API. It is idempotent only in the case that the module fails.
-   - Like the other notification modules, this one requires an external
+   - "This module is non-idempotent because it sends an email through the
+     external API. It is idempotent only in the case that the module fails."
+   - "Like the other notification modules, this one requires an external
      dependency to work. In this case, you'll need an active SendGrid
-     account.
+     account."
 options:
   username:
     description:
-      username for logging into the SendGrid account
+      - username for logging into the SendGrid account
     required: true
   password:
-    description: password that corresponds to the username
+    description: 
+      - password that corresponds to the username
     required: true
   from_address:
     description:
-      the address in the "from" field for the email
+      - the address in the "from" field for the email
     required: true
   to_addresses:
     description:
-      a list with one or more recipient email addresses
+      - a list with one or more recipient email addresses
     required: true
   subject:
     description:
-      the desired subject for the email
+      - the desired subject for the email
     required: true
 
 author: "Matt Makai (@makaimc)"
@@ -85,9 +86,6 @@ EXAMPLES = '''
 # sendgrid module support methods
 #
 import urllib
-import urllib2
-
-import base64
 
 def post_sendgrid_api(module, username, password, from_address, to_addresses,
         subject, body):
@@ -102,11 +100,11 @@ def post_sendgrid_api(module, username, password, from_address, to_addresses,
             recipient = recipient.encode('utf-8')
         to_addresses_api += '&to[]=%s' % recipient
     encoded_data += to_addresses_api
-    request = urllib2.Request(SENDGRID_URI)
-    request.add_header('User-Agent', AGENT)
-    request.add_header('Content-type', 'application/x-www-form-urlencoded')
-    request.add_header('Accept', 'application/json')
-    return urllib2.urlopen(request, encoded_data)
+
+    headers = { 'User-Agent': AGENT,
+            'Content-type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'}
+    return fetch_url(module, SENDGRID_URI, data=encoded_data, headers=headers, method='POST')
 
 
 # =======================================
@@ -133,14 +131,16 @@ def main():
     subject = module.params['subject']
     body = module.params['body']
 
-    try:
-        response = post_sendgrid_api(module, username, password,
-            from_address, to_addresses, subject, body)
-    except Exception:
-        module.fail_json(msg="unable to send email through SendGrid API")
+    response, info = post_sendgrid_api(module, username, password,
+        from_address, to_addresses, subject, body)
+    if info['status'] != 200:
+        module.fail_json(msg="unable to send email through SendGrid API: %s" % info['msg'])
+
 
     module.exit_json(msg=subject, changed=False)
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+from ansible.module_utils.urls import *
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,17 @@
 #!/usr/bin/python
+#
+# This is a free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This Ansible library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 DOCUMENTATION = '''
 ---
@@ -23,12 +36,6 @@ options:
       - The passphrase for the instance key pair. The key must use DES or 3DES encryption for this module to decrypt it. You can use openssl to convert your password protected keys if they do not use DES or 3DES. ex) openssl rsa -in current_key -out new_key -des3. 
     required: false
     default: null
-  region:
-    description:
-      - The AWS region to use.  Must be specified if ec2_url is not used. If not specified then the value of the EC2_REGION environment variable, if any, is used.
-    required: false
-    default: null
-    aliases: [ 'aws_region', 'ec2_region' ]
   wait:
     version_added: "2.0"
     description:
@@ -43,7 +50,9 @@ options:
     required: false
     default: 120
 
-extends_documentation_fragment: aws
+extends_documentation_fragment:
+    - aws
+    - ec2
 '''
 
 EXAMPLES = '''
@@ -131,8 +140,11 @@ def main():
     if wait and datetime.datetime.now() >= end:
         module.fail_json(msg = "wait for password timeout after %d seconds" % wait_timeout)
 
-    f = open(key_file, 'r')
-    key = RSA.importKey(f.read(), key_passphrase)
+    try:
+        f = open(key_file, 'r')
+        key = RSA.importKey(f.read(), key_passphrase)
+    finally:
+        f.close()
     cipher = PKCS1_v1_5.new(key)
     sentinel = 'password decryption failed!!!'
 

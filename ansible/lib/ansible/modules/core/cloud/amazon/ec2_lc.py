@@ -55,80 +55,62 @@ options:
     description:
       - A list of security groups into which instances should be found
     required: false
-  region:
-    description:
-      - The AWS region to use. If not specified then the value of the EC2_REGION environment variable, if any, is used.
-    required: false
-    aliases: ['aws_region', 'ec2_region']
   volumes:
     description:
       - a list of volume dicts, each containing device name and optionally ephemeral id or snapshot id. Size and type (and number of iops for io device type) must be specified for a new volume or a root volume, and may be passed for a snapshot volume. For any volume, a volume size less than 1 will be interpreted as a request not to create the volume.
     required: false
-    default: null
-    aliases: []
   user_data:
     description:
       - opaque blob of data which is made available to the ec2 instance
     required: false
-    default: null
-    aliases: []
   kernel_id:
     description:
       - Kernel id for the EC2 instance
     required: false
-    default: null
-    aliases: []    
   spot_price:
     description:
       - The spot price you are bidding. Only applies for an autoscaling group with spot instances.
     required: false
-    default: null
   instance_monitoring:
     description:
       - whether instances in group are launched with detailed monitoring.
-    required: false
     default: false
-    aliases: []
   assign_public_ip:
     description:
       - Used for Auto Scaling groups that launch instances into an Amazon Virtual Private Cloud. Specifies whether to assign a public IP address to each instance launched in a Amazon VPC.
     required: false
-    aliases: []
     version_added: "1.8"
   ramdisk_id:
     description:
       - A RAM disk id for the instances.
     required: false
-    default: null
-    aliases: []
     version_added: "1.8"
   instance_profile_name:
     description:
       - The name or the Amazon Resource Name (ARN) of the instance profile associated with the IAM role for the instances.
     required: false
-    default: null
-    aliases: []
     version_added: "1.8"
   ebs_optimized:
     description:
       - Specifies whether the instance is optimized for EBS I/O (true) or not (false).
     required: false
     default: false
-    aliases: []
     version_added: "1.8"
   classic_link_vpc_id:
     description:
       - Id of ClassicLink enabled VPC
     required: false
-    default: null
     version_added: "2.0"
   classic_link_vpc_security_groups:
     description:
-       - A list of security group id’s with which to associate the ClassicLink VPC instances.
+      - A list of security group id's with which to associate the ClassicLink VPC instances.
     required: false
-    default: null
     version_added: "2.0"
-extends_documentation_fragment: aws
+extends_documentation_fragment:
+    - aws
+    - ec2
+requires: 
+    - "boto >= 2.39.0"
 """
 
 EXAMPLES = '''
@@ -237,11 +219,36 @@ def create_launch_config(connection, module):
             changed = True
         except BotoServerError, e:
             module.fail_json(msg=str(e))
-    result = launch_configs[0]
 
-    module.exit_json(changed=changed, name=result.name, created_time=str(result.created_time),
-                     image_id=result.image_id, arn=result.launch_configuration_arn,
-                     security_groups=result.security_groups, instance_type=result.instance_type, 
+    result = dict(
+                 ((a[0], a[1]) for a in vars(launch_configs[0]).items()
+                  if a[0] not in ('connection', 'created_time', 'instance_monitoring', 'block_device_mappings'))
+                 )
+    result['created_time'] = str(launch_configs[0].created_time)
+    # Looking at boto's launchconfig.py, it looks like this could be a boolean
+    # value or an object with an enabled attribute.  The enabled attribute
+    # could be a boolean or a string representation of a boolean.  Since
+    # I can't test all permutations myself to see if my reading of the code is
+    # correct, have to code this *very* defensively
+    if launch_configs[0].instance_monitoring is True:
+        result['instance_monitoring'] = True
+    else:
+        try:
+            result['instance_monitoring'] = module.boolean(launch_configs[0].instance_monitoring.enabled)
+        except AttributeError:
+            result['instance_monitoring'] = False
+    if launch_configs[0].block_device_mappings is not None:
+        result['block_device_mappings'] = []
+        for bdm in launch_configs[0].block_device_mappings:
+            result['block_device_mappings'].append(dict(device_name=bdm.device_name, virtual_name=bdm.virtual_name))
+            if bdm.ebs is not None:
+                result['block_device_mappings'][-1]['ebs'] = dict(snapshot_id=bdm.ebs.snapshot_id, volume_size=bdm.ebs.volume_size)
+
+
+    module.exit_json(changed=changed, name=result['name'], created_time=result['created_time'],
+                     image_id=result['image_id'], arn=result['launch_configuration_arn'],
+                     security_groups=result['security_groups'],
+                     instance_type=result['instance_type'],
                      result=result)
 
 
@@ -289,7 +296,7 @@ def main():
 
     try:
         connection = connect_to_aws(boto.ec2.autoscale, region, **aws_connect_params)
-    except (boto.exception.NoAuthHandlerFound, StandardError), e:
+    except (boto.exception.NoAuthHandlerFound, AnsibleAWSError), e:
         module.fail_json(msg=str(e))
 
     state = module.params.get('state')

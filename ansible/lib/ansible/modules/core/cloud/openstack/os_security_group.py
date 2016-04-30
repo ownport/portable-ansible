@@ -91,7 +91,7 @@ def _system_state_change(module, secgroup):
 def main():
     argument_spec = openstack_full_argument_spec(
         name=dict(required=True),
-        description=dict(default=None),
+        description=dict(default=''),
         state=dict(default='present', choices=['absent', 'present']),
     )
 
@@ -134,9 +134,11 @@ def main():
             module.exit_json(changed=changed)
 
     except shade.OpenStackCloudException as e:
-        module.fail_json(msg=e.message)
+        module.fail_json(msg=str(e))
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
 from ansible.module_utils.openstack import *
-main()
+
+if __name__ == "__main__":
+    main()

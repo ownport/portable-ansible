@@ -31,10 +31,10 @@ options:
     description:
       - Name (case sensitive) of the network.
     required: true
-  displaytext:
+  display_text:
     description:
-      - Displaytext of the network.
-      - If not specified, C(name) will be used as displaytext.
+      - Display text of the network.
+      - If not specified, C(name) will be used as C(display_text).
     required: false
     default: null
   network_offering:
@@ -177,7 +177,7 @@ EXAMPLES = '''
 - local_action:
     module: cs_network
     name: my network
-    displaytext: network of domain example.local
+    display_text: network of domain example.local
     network_domain: example.local
 
 # restart a network with clean up
@@ -197,7 +197,7 @@ EXAMPLES = '''
 RETURN = '''
 ---
 id:
-  description: ID of the network.
+  description: UUID of the network.
   returned: success
   type: string
   sample: 04589590-ac63-4ffc-93f5-b698b8ac38b6
@@ -206,7 +206,7 @@ name:
   returned: success
   type: string
   sample: web project
-displaytext:
+display_text:
   description: Display text of the network.
   returned: success
   type: string
@@ -281,7 +281,7 @@ acl_type:
   returned: success
   type: string
   sample: Account
-broadcast_domaintype:
+broadcast_domain_type:
   description: Broadcast domain type of the network.
   returned: success
   type: string
@@ -331,15 +331,25 @@ from ansible.module_utils.cloudstack import *
 class AnsibleCloudStackNetwork(AnsibleCloudStack):
 
     def __init__(self, module):
-        AnsibleCloudStack.__init__(self, module)
+        super(AnsibleCloudStackNetwork, self).__init__(module)
+        self.returns = {
+            'networkdomain':        'network domain',
+            'networkofferingname':  'network_offering',
+            'ispersistent':         'is_persistent',
+            'acltype':              'acl_type',
+            'type':                 'type',
+            'traffictype':          'traffic_type',
+            'ip6gateway':           'gateway_ipv6',
+            'ip6cidr':              'cidr_ipv6',
+            'gateway':              'gateway',
+            'cidr':                 'cidr',
+            'netmask':              'netmask',
+            'broadcastdomaintype':  'broadcast_domain_type',
+            'dns1':                 'dns1',
+            'dns2':                 'dns2',
+        }
+
         self.network = None
-
-
-    def get_or_fallback(self, key=None, fallback_key=None):
-        value = self.module.params.get(key)
-        if not value:
-            value = self.module.params.get(fallback_key)
-        return value
 
 
     def get_vpc(self, key=None):
@@ -380,7 +390,7 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
     def _get_args(self):
         args                        = {}
         args['name']                = self.module.params.get('name')
-        args['displaytext']         = self.get_or_fallback('displaytext','name')
+        args['displaytext']         = self.get_or_fallback('display_text', 'name')
         args['networkdomain']       = self.module.params.get('network_domain')
         args['networkofferingid']   = self.get_network_offering(key='id')
         return args
@@ -510,99 +520,43 @@ class AnsibleCloudStackNetwork(AnsibleCloudStack):
             return network
 
 
-    def get_result(self, network):
-        if network:
-            if 'id' in network:
-                self.result['id'] = network['id']
-            if 'name' in network:
-                self.result['name'] = network['name']
-            if 'displaytext' in network:
-                self.result['displaytext'] = network['displaytext']
-            if 'dns1' in network:
-                self.result['dns1'] = network['dns1']
-            if 'dns2' in network:
-                self.result['dns2'] = network['dns2']
-            if 'cidr' in network:
-                self.result['cidr'] = network['cidr']
-            if 'broadcastdomaintype' in network:
-                self.result['broadcast_domaintype'] = network['broadcastdomaintype']
-            if 'netmask' in network:
-                self.result['netmask'] = network['netmask']
-            if 'gateway' in network:
-                self.result['gateway'] = network['gateway']
-            if 'ip6cidr' in network:
-                self.result['cidr_ipv6'] = network['ip6cidr']
-            if 'ip6gateway' in network:
-                self.result['gateway_ipv6'] = network['ip6gateway']
-            if 'state' in network:
-                self.result['state'] = network['state']
-            if 'type' in network:
-                self.result['type'] = network['type']
-            if 'traffictype' in network:
-                self.result['traffic_type'] = network['traffictype']
-            if 'zone' in network:
-                self.result['zone'] = network['zonename']
-            if 'domain' in network:
-                self.result['domain'] = network['domain']
-            if 'account' in network:
-                self.result['account'] = network['account']
-            if 'project' in network:
-                self.result['project'] = network['project']
-            if 'acltype' in network:
-                self.result['acl_type'] = network['acltype']
-            if 'networkdomain' in network:
-                self.result['network_domain'] = network['networkdomain']
-            if 'networkofferingname' in network:
-                self.result['network_offering'] = network['networkofferingname']
-            if 'ispersistent' in network:
-                self.result['is_persistent'] = network['ispersistent']
-            if 'tags' in network:
-                self.result['tags'] = []
-                for tag in network['tags']:
-                    result_tag          = {}
-                    result_tag['key']   = tag['key']
-                    result_tag['value'] = tag['value']
-                    self.result['tags'].append(result_tag)
-        return self.result
-
 
 def main():
+    argument_spec = cs_argument_spec()
+    argument_spec.update(dict(
+        name = dict(required=True),
+        display_text = dict(default=None),
+        network_offering = dict(default=None),
+        zone = dict(default=None),
+        start_ip = dict(default=None),
+        end_ip = dict(default=None),
+        gateway = dict(default=None),
+        netmask = dict(default=None),
+        start_ipv6 = dict(default=None),
+        end_ipv6 = dict(default=None),
+        cidr_ipv6 = dict(default=None),
+        gateway_ipv6 = dict(default=None),
+        vlan = dict(default=None),
+        vpc = dict(default=None),
+        isolated_pvlan = dict(default=None),
+        clean_up = dict(type='bool', default=False),
+        network_domain = dict(default=None),
+        state = dict(choices=['present', 'absent', 'restarted' ], default='present'),
+        acl_type = dict(choices=['account', 'domain'], default='account'),
+        project = dict(default=None),
+        domain = dict(default=None),
+        account = dict(default=None),
+        poll_async = dict(type='bool', default=True),
+    ))
+    required_together = cs_required_together()
+    required_together.extend([
+        ['start_ip', 'netmask', 'gateway'],
+        ['start_ipv6', 'cidr_ipv6', 'gateway_ipv6'],
+    ])
+
     module = AnsibleModule(
-        argument_spec = dict(
-            name = dict(required=True),
-            displaytext = dict(default=None),
-            network_offering = dict(default=None),
-            zone = dict(default=None),
-            start_ip = dict(default=None),
-            end_ip = dict(default=None),
-            gateway = dict(default=None),
-            netmask = dict(default=None),
-            start_ipv6 = dict(default=None),
-            end_ipv6 = dict(default=None),
-            cidr_ipv6 = dict(default=None),
-            gateway_ipv6 = dict(default=None),
-            vlan = dict(default=None),
-            vpc = dict(default=None),
-            isolated_pvlan = dict(default=None),
-            clean_up = dict(type='bool', choices=BOOLEANS, default=False),
-            network_domain = dict(default=None),
-            state = dict(choices=['present', 'absent', 'restarted' ], default='present'),
-            acl_type = dict(choices=['account', 'domain'], default='account'),
-            project = dict(default=None),
-            domain = dict(default=None),
-            account = dict(default=None),
-            poll_async = dict(type='bool', choices=BOOLEANS, default=True),
-            api_key = dict(default=None),
-            api_secret = dict(default=None, no_log=True),
-            api_url = dict(default=None),
-            api_http_method = dict(choices=['get', 'post'], default='get'),
-            api_timeout = dict(type='int', default=10),
-        ),
-        required_together = (
-            ['api_key', 'api_secret', 'api_url'],
-            ['start_ip', 'netmask', 'gateway'],
-            ['start_ipv6', 'cidr_ipv6', 'gateway_ipv6'],
-        ),
+        argument_spec=argument_spec,
+        required_together=required_together,
         supports_check_mode=True
     )
 
@@ -624,7 +578,7 @@ def main():
 
         result = acs_network.get_result(network)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

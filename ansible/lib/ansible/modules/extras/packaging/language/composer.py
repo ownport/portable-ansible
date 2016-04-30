@@ -22,7 +22,9 @@
 DOCUMENTATION = '''
 ---
 module: composer
-author: "Dimitrios Tydeas Mengidis (@dmtrs)"
+author:
+    - "Dimitrios Tydeas Mengidis (@dmtrs)"
+    - "René Moser (@resmo)"
 short_description: Dependency Manager for PHP
 version_added: "1.6"
 description:
@@ -34,6 +36,12 @@ options:
             - Composer command like "install", "update" and so on
         required: false
         default: install
+    arguments:
+        version_added: "2.0"
+        description:
+            - Composer arguments like required package, version and so on
+        required: false
+        default: null
     working_dir:
         description:
             - Directory of your project ( see --working-dir )
@@ -94,37 +102,66 @@ requirements:
     - php
     - composer installed in bin path (recommended /usr/local/bin)
 notes:
-    - Default options that are always appended in each execution are --no-ansi, --no-progress, and --no-interaction
+    - Default options that are always appended in each execution are --no-ansi, --no-interaction and --no-progress if available.
 '''
 
 EXAMPLES = '''
 # Downloads and installs all the libs and dependencies outlined in the /path/to/project/composer.lock
 - composer: command=install working_dir=/path/to/project
+
+- composer:
+    command: "require"
+    arguments: "my/package"
+    working_dir: "/path/to/project"
+
+# Clone project and install with all dependencies
+- composer:
+    command: "create-project"
+    arguments: "package/package /path/to/project ~1.0"
+    working_dir: "/path/to/project"
+    prefer_dist: "yes"
 '''
 
 import os
 import re
 
+try:
+    import json
+except ImportError:
+    try:
+        import simplejson as json
+    except ImportError:
+        # Let snippet from module_utils/basic.py return a proper error in this case
+        pass
+
+
 def parse_out(string):
     return re.sub("\s+", " ", string).strip()
 
 def has_changed(string):
-    if "Nothing to install or update" in string:
-        return False
-    else:
-        return True
+    return "Nothing to install or update" not in string
 
-def composer_install(module, command, options):
+def get_available_options(module, command='install'):
+    # get all availabe options from a composer command using composer help to json
+    rc, out, err = composer_command(module, "help %s --format=json" % command)
+    if rc != 0:
+        output = parse_out(err)
+        module.fail_json(msg=output)
+
+    command_help_json = json.loads(out)
+    return command_help_json['definition']['options']
+
+def composer_command(module, command, arguments = "", options=[]):
     php_path      = module.get_bin_path("php", True, ["/usr/local/bin"])
     composer_path = module.get_bin_path("composer", True, ["/usr/local/bin"])
-    cmd           = "%s %s %s %s" % (php_path, composer_path, command, " ".join(options))
-
+    cmd           = "%s %s %s %s %s" % (php_path, composer_path, command, " ".join(options), arguments)
     return module.run_command(cmd)
 
 def main():
     module = AnsibleModule(
         argument_spec = dict(
             command              = dict(default="install", type="str", required=False),
+            arguments            = dict(default="", type="str", required=False),
             working_dir          = dict(aliases=["working-dir"], required=True),
             prefer_source        = dict(default="no", type="bool", aliases=["prefer-source"]),
             prefer_dist          = dict(default="no", type="bool", aliases=["prefer-dist"]),
@@ -137,48 +174,59 @@ def main():
         supports_check_mode=True
     )
 
+    # Get composer command with fallback to default
+    command = module.params['command']
+    if re.search(r"\s", command):
+        module.fail_json(msg="Use the 'arguments' param for passing arguments with the 'command'")
+
+    arguments = module.params['arguments']
+    available_options = get_available_options(module=module, command=command)
+
     options = []
 
     # Default options
-    options.append('--no-ansi')
-    options.append('--no-progress')
-    options.append('--no-interaction')
+    default_options = [
+        'no-ansi',
+        'no-interaction',
+        'no-progress',
+    ]
+
+    for option in default_options:
+        if option in available_options:
+            option = "--%s" % option
+            options.append(option)
 
     options.extend(['--working-dir', os.path.abspath(module.params['working_dir'])])
 
-    # Get composer command with fallback to default
-    command = module.params['command']
+    option_params = {
+        'prefer_source':        'prefer-source',
+        'prefer_dist':          'prefer-dist',
+        'no_dev':               'no-dev',
+        'no_scripts':           'no-scripts',
+        'no_plugins':           'no_plugins',
+        'optimize_autoloader':  'optimize-autoloader',
+        'ignore_platform_reqs': 'ignore-platform-reqs',
+        }
 
-    # Prepare options
-    if module.params['prefer_source']:
-        options.append('--prefer-source')
-    if module.params['prefer_dist']:
-        options.append('--prefer-dist')
-    if module.params['no_dev']:
-        options.append('--no-dev')
-    if module.params['no_scripts']:
-        options.append('--no-scripts')
-    if module.params['no_plugins']:
-        options.append('--no-plugins')
-    if module.params['optimize_autoloader']:
-        options.append('--optimize-autoloader')
-    if module.params['ignore_platform_reqs']:
-        options.append('--ignore-platform-reqs')
+    for param, option in option_params.iteritems():
+        if module.params.get(param) and option in available_options:
+            option = "--%s" % option
+            options.append(option)
 
     if module.check_mode:
         options.append('--dry-run')
 
-    rc, out, err = composer_install(module, command, options)
+    rc, out, err = composer_command(module, command, arguments, options)
 
     if rc != 0:
         output = parse_out(err)
-        module.fail_json(msg=output)
+        module.fail_json(msg=output, stdout=err)
     else:
         # Composer version > 1.0.0-alpha9 now use stderr for standard notification messages
         output = parse_out(out + err)
-        module.exit_json(changed=has_changed(output), msg=output)
+        module.exit_json(changed=has_changed(output), msg=output, stdout=out+err)
 
 # import module snippets
 from ansible.module_utils.basic import *
-
-main()
+if __name__ == '__main__':
+    main()

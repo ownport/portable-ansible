@@ -34,16 +34,14 @@ options:
       - Names of roles or features to install as a single feature or a comma-separated list of features
     required: true
     default: null
-    aliases: []
   state:
     description:
       - State of the features or roles on the system
     required: false
-    choices: 
+    choices:
       - present
       - absent
     default: present
-    aliases: []
   restart:
     description:
       - Restarts the computer automatically when installation is complete, if restarting is required by the roles or features installed.
@@ -51,7 +49,6 @@ options:
       - yes
       - no
     default: null
-    aliases: []
   include_sub_features:
     description:
       - Adds all subfeatures of the specified feature
@@ -59,7 +56,6 @@ options:
       - yes
       - no
     default: null
-    aliases: []
   include_management_tools:
     description:
       - Adds the corresponding management tools to the specified feature
@@ -67,8 +63,13 @@ options:
       - yes
       - no
     default: null
-    aliases: []
-author: 
+  source:
+    description:
+      - Specify a source to install the feature from
+    required: false
+    choices: [ ' {driveletter}:\sources\sxs', ' {IP}\Share\sources\sxs' ]
+    version_added: "2.1"
+author:
     - "Paul Durivage (@angstwad)"
     - "Trond Hindenes (@trondhindenes)"
 '''
@@ -79,6 +80,7 @@ EXAMPLES = '''
 # PS C:\Users\Administrator> Import-Module ServerManager; Get-WindowsFeature
 $ ansible -i hosts -m win_feature -a "name=Web-Server" all
 $ ansible -i hosts -m win_feature -a "name=Web-Server,Web-Common-Http" all
+ansible -m "win_feature" -a "name=NET-Framework-Core source=C:/Temp/iso/sources/sxs" windows
 
 
 # Playbook example
@@ -90,7 +92,7 @@ $ ansible -i hosts -m win_feature -a "name=Web-Server,Web-Common-Http" all
     - name: Install IIS
       win_feature:
         name: "Web-Server"
-        state: absent
+        state: present
         restart: yes
         include_sub_features: yes
         include_management_tools: yes

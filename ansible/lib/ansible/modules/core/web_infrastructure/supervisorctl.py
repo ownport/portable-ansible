@@ -75,8 +75,8 @@ notes:
   - When C(state) = I(present), the module will call C(supervisorctl reread) then C(supervisorctl add) if the program/group does not exist.
   - When C(state) = I(restarted), the module will call C(supervisorctl update) then call C(supervisorctl restart).
 requirements: [ "supervisorctl" ]
-author: 
-    - "Matt Wright (@mattupstate)" 
+author:
+    - "Matt Wright (@mattupstate)"
     - "Aaron Wang (@inetfuture) <inetfuture@gmail.com>"
 '''
 
@@ -98,11 +98,11 @@ EXAMPLES = '''
 def main():
     arg_spec = dict(
         name=dict(required=True),
-        config=dict(required=False),
+        config=dict(required=False, type='path'),
         server_url=dict(required=False),
         username=dict(required=False),
         password=dict(required=False),
-        supervisorctl_path=dict(required=False),
+        supervisorctl_path=dict(required=False, type='path'),
         state=dict(required=True, choices=['present', 'started', 'restarted', 'stopped', 'absent'])
     )
 
@@ -120,9 +120,11 @@ def main():
     password = module.params.get('password')
     supervisorctl_path = module.params.get('supervisorctl_path')
 
+    # we check error message for a pattern, so we need to make sure that's in C locale
+    module.run_command_environ_update = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C', LC_CTYPE='C')
+
     if supervisorctl_path:
-        supervisorctl_path = os.path.expanduser(supervisorctl_path)
-        if os.path.exists(supervisorctl_path) and module.is_executable(supervisorctl_path):
+        if os.path.exists(supervisorctl_path) and is_executable(supervisorctl_path):
             supervisorctl_args = [supervisorctl_path]
         else:
             module.fail_json(
@@ -131,7 +133,7 @@ def main():
         supervisorctl_args = [module.get_bin_path('supervisorctl', True)]
 
     if config:
-        supervisorctl_args.extend(['-c', os.path.expanduser(config)])
+        supervisorctl_args.extend(['-c', config])
     if server_url:
         supervisorctl_args.extend(['-s', server_url])
     if username:
@@ -194,14 +196,12 @@ def main():
     if state == 'restarted':
         rc, out, err = run_supervisorctl('update', check_rc=True)
         processes = get_matched_processes()
-        if not processes:
+        if len(processes) == 0:
             module.fail_json(name=name, msg="ERROR (no such process)")
 
         take_action_on_processes(processes, lambda s: True, 'restart', 'started')
 
     processes = get_matched_processes()
-    if not processes:
-         module.fail_json(name=name, msg="ERROR (no such process)")
 
     if state == 'absent':
         if len(processes) == 0:
@@ -230,12 +230,17 @@ def main():
             module.fail_json(msg=out, name=name, state=state)
 
     if state == 'started':
+        if len(processes) == 0:
+            module.fail_json(name=name, msg="ERROR (no such process)")
         take_action_on_processes(processes, lambda s: s not in ('RUNNING', 'STARTING'), 'start', 'started')
 
     if state == 'stopped':
+        if len(processes) == 0:
+            module.fail_json(name=name, msg="ERROR (no such process)")
         take_action_on_processes(processes, lambda s: s in ('RUNNING', 'STARTING'), 'stop', 'stopped')
 
 # import module snippets
 from ansible.module_utils.basic import *
-
-main()
+# is_executable from basic
+if __name__ == '__main__':
+    main()

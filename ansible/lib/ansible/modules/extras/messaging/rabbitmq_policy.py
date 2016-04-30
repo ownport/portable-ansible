@@ -38,6 +38,13 @@ options:
       - The name of the vhost to apply to.
     required: false
     default: /
+  apply_to:
+    description:
+      - What the policy applies to. Requires RabbitMQ 3.2.0 or later.
+    required: false
+    default: all
+    choices: [all, exchanges, queues]
+    version_added: "2.1"
   pattern:
     description:
       - A regex of queues to apply the policy to.
@@ -81,6 +88,7 @@ class RabbitMqPolicy(object):
         self._name = name
         self._vhost = module.params['vhost']
         self._pattern = module.params['pattern']
+        self._apply_to = module.params['apply_to']
         self._tags = module.params['tags']
         self._priority = module.params['priority']
         self._node = module.params['node']
@@ -112,6 +120,9 @@ class RabbitMqPolicy(object):
         args.append(json.dumps(self._tags))
         args.append('--priority')
         args.append(self._priority)
+        if (self._apply_to != 'all'):
+            args.append('--apply-to')
+            args.append(self._apply_to)
         return self._exec(args)
 
     def clear(self):
@@ -123,6 +134,7 @@ def main():
         name=dict(required=True),
         vhost=dict(default='/'),
         pattern=dict(required=True),
+        apply_to=dict(default='all', choices=['all', 'exchanges', 'queues']),
         tags=dict(type='dict', required=True),
         priority=dict(default='0'),
         node=dict(default='rabbit'),

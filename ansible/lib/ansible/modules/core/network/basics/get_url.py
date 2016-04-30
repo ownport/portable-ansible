@@ -46,8 +46,6 @@ options:
     description:
       - HTTP, HTTPS, or FTP URL in the form (http|https|ftp)://[user[:pass]]@host.domain[:port]/path
     required: true
-    default: null
-    aliases: []
   dest:
     description:
       - absolute path of where to download the file to.
@@ -57,7 +55,14 @@ options:
         If C(dest) is a directory, the file will always be
         downloaded (regardless of the force option), but replaced only if the contents changed.
     required: true
-    default: null
+  tmp_dest:
+    description:
+      - absolute path of where temporary file is downloaded to.
+      - Defaults to TMPDIR, TEMP or TMP env variables or a platform specific value
+      - https://docs.python.org/2/library/tempfile.html#tempfile.tempdir
+    required: false
+    default: ''
+    version_added: '2.1'
   force:
     description:
       - If C(yes) and C(dest) is not a directory, will download the file every
@@ -70,12 +75,37 @@ options:
     choices: [ "yes", "no" ]
     default: "no"
     aliases: [ "thirsty" ]
+  backup:
+    description:
+      - Create a backup file including the timestamp information so you can get
+        the original file back if you somehow clobbered it incorrectly.
+    required: false
+    choices: [ "yes", "no" ]
+    default: "no"
+    version_added: '2.1'
   sha256sum:
     description:
       - If a SHA-256 checksum is passed to this parameter, the digest of the
         destination file will be calculated after it is downloaded to ensure
         its integrity and verify that the transfer completed successfully.
+        This option is deprecated. Use 'checksum'.
     version_added: "1.3"
+    required: false
+    default: null
+  checksum:
+    description:
+      - 'If a checksum is passed to this parameter, the digest of the
+        destination file will be calculated after it is downloaded to ensure
+        its integrity and verify that the transfer completed successfully.
+        Format: <algorithm>:<checksum>, e.g.: checksum="sha256:D98291AC[...]B6DC7B97"
+        If you worry about portability, only the sha1 algorithm is available
+        on all platforms and python versions.  The third party hashlib
+        library can be installed for access to additional algorithms.
+        Additionaly, if a checksum is passed to this parameter, and the file exist under
+        the C(dest) location, the destination_checksum would be calculated, and if
+        checksum equals destination_checksum, the file download would be skipped
+        (unless C(force) is true). '
+    version_added: "2.0"
     required: false
     default: null
   use_proxy:
@@ -94,10 +124,16 @@ options:
     choices: ['yes', 'no']
   timeout:
     description:
-      - Timeout for URL request
+      - Timeout in seconds for URL request
     required: false
     default: 10
     version_added: '1.8'
+  headers:
+    description:
+        - 'Add custom HTTP headers to a request in the format "key:value,key:value"'
+    required: false
+    default: null
+    version_added: '2.0'
   url_username:
     description:
       - The username for use in HTTP basic authentication. This parameter can be used
@@ -106,10 +142,20 @@ options:
     version_added: '1.6'
   url_password:
     description:
-      - The password for use in HTTP basic authentication. If the C(url_username)
-        parameter is not specified, the C(url_password) parameter will not be used.
+        - The password for use in HTTP basic authentication. If the C(url_username)
+          parameter is not specified, the C(url_password) parameter will not be used.
     required: false
     version_added: '1.6'
+  force_basic_auth:
+    version_added: '2.0'
+    description:
+      - httplib2, the library used by the uri module only sends authentication information when a webservice
+        responds to an initial request with a 401 status. Since some basic auth services do not properly
+        send a 401, logins will fail. This option forces the sending of the Basic authentication header
+        upon initial request.
+    required: false
+    choices: [ "yes", "no" ]
+    default: "no"
   others:
     description:
       - all arguments accepted by the M(file) module also work here
@@ -123,17 +169,21 @@ EXAMPLES='''
 - name: download foo.conf
   get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf mode=0440
 
-- name: download file with sha256 check
-  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf sha256sum=b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
+- name: download file and force basic auth
+  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf force_basic_auth=yes
+
+- name: download file with custom HTTP headers
+  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf headers='key:value,key:value'
+
+- name: download file with check
+  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf checksum=sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
+  get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf checksum=md5:66dffb5228a211e61d6d7ef4a86f5758
+
+- name: download file from a file path
+  get_url: url="file:///tmp/afile.txt" dest=/tmp/afilecopy.txt  
 '''
 
 import urlparse
-
-try:
-    import hashlib
-    HAS_HASHLIB=True
-except ImportError:
-    HAS_HASHLIB=False
 
 # ==============================================================
 # url handling
@@ -144,23 +194,35 @@ def url_filename(url):
         return 'index.html'
     return fn
 
-def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10):
+def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, headers=None, tmp_dest=''):
     """
     Download data from the url and store in a temporary file.
 
     Return (tempfile, info about the request)
     """
 
-    rsp, info = fetch_url(module, url, use_proxy=use_proxy, force=force, last_mod_time=last_mod_time, timeout=timeout)
+    rsp, info = fetch_url(module, url, use_proxy=use_proxy, force=force, last_mod_time=last_mod_time, timeout=timeout, headers=headers)
 
     if info['status'] == 304:
         module.exit_json(url=url, dest=dest, changed=False, msg=info.get('msg', ''))
 
     # create a temporary file and copy content to do checksum-based replacement
-    if info['status'] != 200:
+    if info['status'] != 200 and not url.startswith('file:/'):
         module.fail_json(msg="Request failed", status_code=info['status'], response=info['msg'], url=url, dest=dest)
 
-    fd, tempname = tempfile.mkstemp()
+    if tmp_dest != '':
+        # tmp_dest should be an existing dir
+        tmp_dest_is_dir = os.path.isdir(tmp_dest)
+        if not tmp_dest_is_dir:
+            if os.path.exists(tmp_dest):
+                module.fail_json(msg="%s is a file but should be a directory." % tmp_dest)
+            else:
+                module.fail_json(msg="%s directoy does not exist." % tmp_dest)
+
+        fd, tempname = tempfile.mkstemp(dir=tmp_dest)
+    else:
+        fd, tempname = tempfile.mkstemp()
+
     f = os.fdopen(fd, 'wb')
     try:
         shutil.copyfileobj(rsp, f)
@@ -190,17 +252,21 @@ def extract_filename_from_headers(headers):
 
     return res
 
+
 # ==============================================================
 # main
 
 def main():
-
     argument_spec = url_argument_spec()
     argument_spec.update(
         url = dict(required=True),
         dest = dict(required=True),
+        backup = dict(default=False, type='bool'),
         sha256sum = dict(default=''),
+        checksum = dict(default=''),
         timeout = dict(required=False, type='int', default=10),
+        headers = dict(required=False, default=None),
+        tmp_dest = dict(required=False, default=''),
     )
 
     module = AnsibleModule(
@@ -211,38 +277,66 @@ def main():
 
     url  = module.params['url']
     dest = os.path.expanduser(module.params['dest'])
+    backup = module.params['backup']
     force = module.params['force']
     sha256sum = module.params['sha256sum']
+    checksum = module.params['checksum']
     use_proxy = module.params['use_proxy']
     timeout = module.params['timeout']
+    tmp_dest = os.path.expanduser(module.params['tmp_dest'])
+
+    # Parse headers to dict
+    if module.params['headers']:
+        try:
+            headers = dict(item.split(':') for item in module.params['headers'].split(','))
+        except:
+            module.fail_json(msg="The header parameter requires a key:value,key:value syntax to be properly parsed.")
+    else:
+        headers = None
 
     dest_is_dir = os.path.isdir(dest)
     last_mod_time = None
 
-    # Remove any non-alphanumeric characters, including the infamous
-    # Unicode zero-width space
-    stripped_sha256sum = re.sub(r'\W+', '', sha256sum)
+    # workaround for usage of deprecated sha256sum parameter
+    if sha256sum != '':
+        checksum = 'sha256:%s' % (sha256sum)
 
-    # Fail early if sha256 is not supported
-    if sha256sum != '' and not HAS_HASHLIB:
-        module.fail_json(msg="The sha256sum parameter requires hashlib, which is available in Python 2.5 and higher")
+    # checksum specified, parse for algorithm and checksum
+    if checksum != '':
+        try:
+            algorithm, checksum = checksum.rsplit(':', 1)
+            # Remove any non-alphanumeric characters, including the infamous
+            # Unicode zero-width space
+            checksum = re.sub(r'\W+', '', checksum).lower()
+            # Ensure the checksum portion is a hexdigest
+            int(checksum, 16)
+        except ValueError:
+            module.fail_json(msg="The checksum parameter has to be in format <algorithm>:<checksum>")
 
     if not dest_is_dir and os.path.exists(dest):
         checksum_mismatch = False
 
         # If the download is not forced and there is a checksum, allow
         # checksum match to skip the download.
-        if not force and sha256sum != '':
-            destination_checksum = module.sha256(dest)
+        if not force and checksum != '':
+            destination_checksum = module.digest_from_file(dest, algorithm)
 
-            if stripped_sha256sum.lower() == destination_checksum:
+            if checksum == destination_checksum:
                 module.exit_json(msg="file already exists", dest=dest, url=url, changed=False)
 
             checksum_mismatch = True
 
-        # Not forcing redownload, unless sha256sum has already failed
+        # Not forcing redownload, unless checksum does not match
         if not force and not checksum_mismatch:
-            module.exit_json(msg="file already exists", dest=dest, url=url, changed=False)
+            # allow file attribute changes
+            module.params['path'] = dest
+            file_args = module.load_file_common_arguments(module.params)
+            file_args['path'] = dest
+            changed = module.set_fs_attributes_if_different(file_args, False)
+
+            if changed:
+                module.exit_json(msg="file already exists but file attributes changed", dest=dest, url=url, changed=changed)
+            module.exit_json(msg="file already exists", dest=dest, url=url, changed=changed)
 
         # If the file already exists, prepare the last modified time for the
         # request.
@@ -250,7 +344,7 @@ def main():
         last_mod_time = datetime.datetime.utcfromtimestamp(mtime)
 
     # download to tmpsrc
-    tmpsrc, info = url_get(module, url, dest, use_proxy, last_mod_time, force, timeout)
+    tmpsrc, info = url_get(module, url, dest, use_proxy, last_mod_time, force, timeout, headers, tmp_dest)
 
     # Now the request has completed, we can finally generate the final
     # destination file name from the info dict.
@@ -291,8 +385,12 @@ def main():
             os.remove(tmpsrc)
             module.fail_json( msg="Destination %s not writable" % (os.path.dirname(dest)))
 
+    backup_file = None
     if checksum_src != checksum_dest:
         try:
+            if backup:
+                if os.path.exists(dest):
+                    backup_file = module.backup_local(dest)
             shutil.copyfile(tmpsrc, dest)
         except Exception, err:
             os.remove(tmpsrc)
@@ -301,14 +399,12 @@ def main():
     else:
         changed = False
 
-    # Check the digest of the destination file and ensure that it matches the
-    # sha256sum parameter if it is present
-    if sha256sum != '':
-        destination_checksum = module.sha256(dest)
+    if checksum != '':
+        destination_checksum = module.digest_from_file(dest, algorithm)
 
-        if stripped_sha256sum.lower() != destination_checksum:
+        if checksum != destination_checksum:
             os.remove(dest)
-            module.fail_json(msg="The SHA-256 checksum for %s did not match %s; it was %s." % (dest, sha256sum, destination_checksum))
+            module.fail_json(msg="The checksum for %s did not match %s; it was %s." % (dest, checksum, destination_checksum))
 
     os.remove(tmpsrc)
 
@@ -324,10 +420,15 @@ def main():
     except ValueError:
         md5sum = None
 
-    # Mission complete
+    res_args = dict(
+        url = url, dest = dest, src = tmpsrc, md5sum = md5sum, checksum_src = checksum_src,
+        checksum_dest = checksum_dest, changed = changed, msg = info.get('msg', '')
+    )
+    if backup_file:
+        res_args['backup_file'] = backup_file
 
-    module.exit_json(url=url, dest=dest, src=tmpsrc, md5sum=md5sum, checksum=checksum_src,
-        sha256sum=sha256sum, changed=changed, msg=info.get('msg', ''))
+    # Mission complete
+    module.exit_json(**res_args)
 
 # import module snippets
 from ansible.module_utils.basic import *

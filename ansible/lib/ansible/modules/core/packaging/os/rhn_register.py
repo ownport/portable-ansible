@@ -62,6 +62,18 @@ options:
         required: False
         default: null
         version_added: "2.0"
+    sslcacert:
+        description:
+            - supply a custom ssl CA certificate file for use with registration
+        required: False
+        default: None
+        version_added: "2.1"
+    systemorgid:
+        description:
+            - supply an organizational id for use with registration
+        required: False
+        default: None
+        version_added: "2.1"
     channels:
         description:
             - Optionally specify a list of comma-separated channels to subscribe to upon successful registration.
@@ -218,22 +230,25 @@ class Rhn(RegistrationBase):
         self.update_plugin_conf('rhnplugin', True)
         self.update_plugin_conf('subscription-manager', False)
 
-    def register(self, enable_eus=False, activationkey=None, profilename=None):
+    def register(self, enable_eus=False, activationkey=None, profilename=None, sslcacert=None, systemorgid=None):
         '''
             Register system to RHN.  If enable_eus=True, extended update
             support will be requested.
         '''
-        register_cmd = "/usr/sbin/rhnreg_ks --username='%s' --password='%s' --force" % (self.username, self.password)
+        register_cmd = ['/usr/sbin/rhnreg_ks', '--username', self.username, '--password', self.password, '--force']
         if self.module.params.get('server_url', None):
-            register_cmd += " --serverUrl=%s" % self.module.params.get('server_url')
+            register_cmd.extend(['--serverUrl', self.module.params.get('server_url')])
         if enable_eus:
-            register_cmd += " --use-eus-channel"
+            register_cmd.append('--use-eus-channel')
         if activationkey is not None:
-            register_cmd += " --activationkey '%s'" % activationkey
+            register_cmd.extend(['--activationkey', activationkey])
         if profilename is not None:
-            register_cmd += " --profilename '%s'" % profilename
-        # FIXME - support --systemorgid
-        rc, stdout, stderr = self.module.run_command(register_cmd, check_rc=True, use_unsafe_shell=True)
+            register_cmd.extend(['--profilename', profilename])
+        if sslcacert is not None:
+            register_cmd.extend(['--sslCACert', sslcacert])
+        if systemorgid is not None:
+            register_cmd.extend(['--systemorgid', systemorgid])
+        rc, stdout, stderr = self.module.run_command(register_cmd, check_rc=True)
 
     def api(self, method, *args):
         '''
@@ -264,10 +279,31 @@ class Rhn(RegistrationBase):
     def subscribe(self, channels=[]):
         if len(channels) <= 0:
             return
-        current_channels = self.api('channel.software.listSystemChannels', self.systemid)
-        new_channels = [item['channel_label'] for item in current_channels]
-        new_channels.extend(channels)
-        return self.api('channel.software.setSystemChannels', self.systemid, new_channels)
+        if self._is_hosted():
+            current_channels = self.api('channel.software.listSystemChannels', self.systemid)
+            new_channels = [item['channel_label'] for item in current_channels]
+            new_channels.extend(channels)
+            return self.api('channel.software.setSystemChannels', self.systemid, list(new_channels))
+        else:
+            current_channels = self.api('channel.software.listSystemChannels', self.systemid)
+            current_channels = [item['label'] for item in current_channels]
+            new_base = None
+            new_childs = []
+            for ch in channels:
+                if ch in current_channels:
+                    continue
+                if self.api('channel.software.getDetails', ch)['parent_channel_label'] == '':
+                    new_base = ch
+                else:
+                    if ch not in new_childs:
+                        new_childs.append(ch)
+            out_base = 0
+            out_childs = 0
+            if new_base:
+                out_base = self.api('system.setBaseChannel', self.systemid, new_base)
+            if new_childs:
+                out_childs = self.api('system.setChildChannels', self.systemid, new_childs)
+            return out_base and out_childs
 
     def _subscribe(self, channels=[]):
         '''
@@ -283,6 +319,16 @@ class Rhn(RegistrationBase):
                 if re.search(wanted_repo, available_channel):
                     rc, stdout, stderr = self.module.run_command(rhn_channel_cmd + " --add --channel=%s" % available_channel, check_rc=True)
 
+    def _is_hosted(self):
+        '''
+            Return True if we are running against Hosted (rhn.redhat.com) or
+            False otherwise (when running against Satellite or Spacewalk)
+        '''
+        if 'rhn.redhat.com' in self.hostname:
+            return True
+        else:
+            return False
+
 def main():
 
     # Read system RHN configuration
@@ -292,10 +338,12 @@ def main():
                 argument_spec = dict(
                     state = dict(default='present', choices=['present', 'absent']),
                     username = dict(default=None, required=False),
-                    password = dict(default=None, required=False),
+                    password = dict(default=None, required=False, no_log=True),
                     server_url = dict(default=rhn.config.get_option('serverURL'), required=False),
-                    activationkey = dict(default=None, required=False),
+                    activationkey = dict(default=None, required=False, no_log=True),
                     profilename = dict(default=None, required=False),
+                    sslcacert = dict(default=None, required=False, type='path'),
+                    systemorgid = dict(default=None, required=False),
                     enable_eus = dict(default=False, type='bool'),
                     channels = dict(default=[], type='list'),
                 )
@@ -307,6 +355,8 @@ def main():
     rhn.configure(module.params['server_url'])
     activationkey = module.params['activationkey']
     profilename = module.params['profilename']
+    sslcacert = module.params['sslcacert']
+    systemorgid = module.params['systemorgid']
     channels = module.params['channels']
     rhn.module = module
 
@@ -325,7 +375,7 @@ def main():
         else:
             try:
                 rhn.enable()
-                rhn.register(module.params['enable_eus'] == True, activationkey)
+                rhn.register(module.params['enable_eus'] == True, activationkey, profilename, sslcacert, systemorgid)
                 rhn.subscribe(channels)
             except Exception, e:
                 module.fail_json(msg="Failed to register with '%s': %s" % (rhn.hostname, e))

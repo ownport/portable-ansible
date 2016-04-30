@@ -52,6 +52,18 @@ options:
         description:
             - Zabbix user password.
         required: true
+    http_login_user:
+        description:
+            - Basic Auth login
+        required: false
+        default: None
+        version_added: "2.1"
+    http_login_password:
+        description:
+            - Basic Auth password
+        required: false
+        default: None
+        version_added: "2.1"
     host_names:
         description:
             - Hosts to manage maintenance window for.
@@ -91,6 +103,11 @@ options:
             - Type of maintenance. With data collection, or without.
         required: false
         default: "true"
+    timeout:
+        description:
+            - The timeout of API request (seconds).
+        default: 10
+        version_added: "2.1"
 notes:
     - Useful for setting hosts in maintenance mode before big update,
       and removing maintenance window after update.
@@ -202,18 +219,6 @@ def delete_maintenance(zbx, maintenance_id):
     return 0, None, None
 
 
-def check_maintenance(zbx, name):
-    try:
-        result = zbx.maintenance.exists(
-            {
-                "name": name
-            }
-        )
-    except BaseException as e:
-        return 1, None, str(e)
-    return 0, result, None
-
-
 def get_group_ids(zbx, host_groups):
     group_ids = []
     for group in host_groups:
@@ -266,15 +271,18 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             state=dict(required=False, default='present', choices=['present', 'absent']),
-            server_url=dict(required=True, default=None, aliases=['url']),
+            server_url=dict(type='str', required=True, default=None, aliases=['url']),
             host_names=dict(type='list', required=False, default=None, aliases=['host_name']),
             minutes=dict(type='int', required=False, default=10),
             host_groups=dict(type='list', required=False, default=None, aliases=['host_group']),
-            login_user=dict(required=True),
-            login_password=dict(required=True, no_log=True),
-            name=dict(required=True),
-            desc=dict(required=False, default="Created by Ansible"),
+            login_user=dict(type='str', required=True),
+            login_password=dict(type='str', required=True, no_log=True),
+            http_login_user=dict(type='str', required=False, default=None),
+            http_login_password=dict(type='str', required=False, default=None, no_log=True),
+            name=dict(type='str', required=True),
+            desc=dict(type='str', required=False, default="Created by Ansible"),
             collect_data=dict(type='bool', required=False, default=True),
+            timeout=dict(type='int', default=10),
         ),
         supports_check_mode=True,
     )
@@ -287,18 +295,22 @@ def main():
     state = module.params['state']
     login_user = module.params['login_user']
     login_password = module.params['login_password']
+    http_login_user = module.params['http_login_user']
+    http_login_password = module.params['http_login_password']
     minutes = module.params['minutes']
     name = module.params['name']
     desc = module.params['desc']
     server_url = module.params['server_url']
     collect_data = module.params['collect_data']
+    timeout = module.params['timeout']
+
     if collect_data:
         maintenance_type = 0
     else:
         maintenance_type = 1
 
     try:
-        zbx = ZabbixAPI(server_url)
+        zbx = ZabbixAPI(server_url, timeout=timeout, user=http_login_user, passwd=http_login_password)
         zbx.login(login_user, login_password)
     except BaseException as e:
         module.fail_json(msg="Failed to connect to Zabbix server: %s" % e)
@@ -325,11 +337,11 @@ def main():
         else:
             host_ids = []
 
-        (rc, exists, error) = check_maintenance(zbx, name)
+        (rc, maintenance, error) = get_maintenance_id(zbx, name)
         if rc != 0:
             module.fail_json(msg="Failed to check maintenance %s existance: %s" % (name, error))
 
-        if not exists:
+        if not maintenance:
             if not host_names and not host_groups:
                 module.fail_json(msg="At least one host_name or host_group must be defined for each created maintenance.")
 
@@ -344,24 +356,19 @@ def main():
 
     if state == "absent":
 
-        (rc, exists, error) = check_maintenance(zbx, name)
+        (rc, maintenance, error) = get_maintenance_id(zbx, name)
         if rc != 0:
             module.fail_json(msg="Failed to check maintenance %s existance: %s" % (name, error))
 
-        if exists:
-            (rc, maintenance, error) = get_maintenance_id(zbx, name)
-            if rc != 0:
-                module.fail_json(msg="Failed to get maintenance id: %s" % error)
-
-            if maintenance:
-                if module.check_mode:
+        if maintenance:
+            if module.check_mode:
+                changed = True
+            else:
+                (rc, _, error) = delete_maintenance(zbx, maintenance)
+                if rc == 0:
                     changed = True
                 else:
-                    (rc, _, error) = delete_maintenance(zbx, maintenance)
-                    if rc == 0:
-                        changed = True
-                    else:
-                        module.fail_json(msg="Failed to remove maintenance: %s" % error)
+                    module.fail_json(msg="Failed to remove maintenance: %s" % error)
 
     module.exit_json(changed=changed)
 

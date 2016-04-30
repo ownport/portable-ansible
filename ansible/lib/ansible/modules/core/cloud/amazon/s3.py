@@ -35,7 +35,8 @@ options:
     default: null
     aliases: ['ec2_secret_key', 'secret_key']
   bucket:
-    description: Bucket name.
+    description:
+      - Bucket name.
     required: true
     default: null
     aliases: []
@@ -57,6 +58,12 @@ options:
     required: false
     default: 600
     aliases: []
+  headers:
+    description:
+      - Custom headers for PUT operation, as a dictionary of 'key=value' and 'key=value,key=value'.
+    required: false
+    default: null
+    version_added: "2.0"
   marker:
     description:
       - Specifies the key to start with when using list mode. Object keys are returned in alphabetical order, starting with key after the marker in order.
@@ -77,15 +84,20 @@ options:
     version_added: "1.6"
   mode:
     description:
-      - Switches the module behaviour between put (upload), get (download), geturl (return download url (Ansible 1.3+), getstr (download object as string (1.3+)), list (list keys (2.0+)), create (bucket), delete (bucket), and delobj (delete object).
+      - Switches the module behaviour between put (upload), get (download), geturl (return download url, Ansible 1.3+), getstr (download object as string (1.3+)), list (list keys, Ansible 2.0+), create (bucket), delete (bucket), and delobj (delete object, Ansible 2.0+).
     required: true
-    default: null
-    aliases: []
+    choices: ['get', 'put', 'delete', 'create', 'geturl', 'getstr', 'delobj', 'list']
   object:
     description:
       - Keyname of the object inside the bucket. Can be used to create "virtual directories", see examples.
     required: false
     default: null
+  permission:
+    description:
+      - This option lets the user set the canned permissions on the object/bucket that are created. The permissions that can be set are 'private', 'public-read', 'public-read-write', 'authenticated-read'. Multiple permissions can be specified as a list.
+    required: false
+    default: private
+    version_added: "2.0"
   prefix:
     description:
       - Limits the response to keys that begin with the specified prefix for list mode
@@ -101,7 +113,7 @@ options:
     version_added: "2.0"
   overwrite:
     description:
-      - Force overwrite either locally on the filesystem or remotely with the object/key. Used with PUT and GET operations.
+      - Force overwrite either locally on the filesystem or remotely with the object/key. Used with PUT and GET operations. Boolean or one of [Always, Never, Different], new in 2.0
     required: false
     default: true
     version_added: "1.2"
@@ -118,20 +130,21 @@ options:
     default: 0
     version_added: "2.0"
   s3_url:
-    description: S3 URL endpoint for usage with Eucalypus, fakes3, etc.  Otherwise assumes AWS
+    description:
+      - S3 URL endpoint for usage with Eucalypus, fakes3, etc.  Otherwise assumes AWS
     default: null
     aliases: [ S3_URL ]
   src:
-    description: The source file path when performing a PUT operation.
+    description:
+      - The source file path when performing a PUT operation.
     required: false
     default: null
     aliases: []
     version_added: "1.3"
 
 requirements: [ "boto" ]
-author: 
+author:
     - "Lester Wade (@lwade)"
-    - "Ralph Tice (@ralph-tice)"
 extends_documentation_fragment: aws
 '''
 
@@ -148,6 +161,9 @@ EXAMPLES = '''
 # PUT/upload with metadata
 - s3: bucket=mybucket object=/my/desired/key.txt src=/usr/local/myfile.txt mode=put metadata='Content-Encoding=gzip,Cache-Control=no-cache'
 
+# PUT/upload with custom headers
+- s3: bucket=mybucket object=/my/desired/key.txt src=/usr/local/myfile.txt mode=put headers=x-amz-grant-full-control=emailAddress=owner@example.com
+
 # List keys simple
 - s3: bucket=mybucket mode=list
 
@@ -155,7 +171,7 @@ EXAMPLES = '''
 - s3: bucket=mybucket mode=list prefix=/my/desired/ marker=/my/desired/0023.txt max_keys=472
 
 # Create an empty bucket
-- s3: bucket=mybucket mode=create
+- s3: bucket=mybucket mode=create permission=public-read
 
 # Create a bucket with key as directory, in the EU region
 - s3: bucket=mybucket object=/my/directory/path mode=create region=eu-west-1
@@ -163,7 +179,7 @@ EXAMPLES = '''
 # Delete a bucket and all contents
 - s3: bucket=mybucket mode=delete
 
-# GET an object but dont download if the file checksums match 
+# GET an object but dont download if the file checksums match. New in 2.0
 - s3: bucket=mybucket object=/my/desired/key.txt dest=/usr/local/myfile.txt mode=get overwrite=different
 
 # Delete an object from a bucket
@@ -172,7 +188,6 @@ EXAMPLES = '''
 
 import os
 import urlparse
-import hashlib
 from ssl import SSLError
 
 try:
@@ -181,6 +196,7 @@ try:
     from boto.s3.connection import Location
     from boto.s3.connection import OrdinaryCallingFormat
     from boto.s3.connection import S3Connection
+    from boto.s3.acl import CannedACLStrings
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
@@ -225,6 +241,8 @@ def create_bucket(module, s3, bucket, location=None):
         location = Location.DEFAULT
     try:
         bucket = s3.create_bucket(bucket, location=location)
+        for acl in module.params.get('permission'):
+            bucket.set_acl(acl)
     except s3.provider.storage_response_error, e:
         module.fail_json(msg= str(e))
     if bucket:
@@ -270,15 +288,6 @@ def create_dirkey(module, s3, bucket, obj):
     except s3.provider.storage_response_error, e:
         module.fail_json(msg= str(e))
 
-def upload_file_check(src):
-    if os.path.exists(src):
-        file_exists is True
-    else:
-        file_exists is False
-    if os.path.isdir(src):
-        module.fail_json(msg="Specifying a directory is not a valid source for upload.", failed=True)
-    return file_exists
-
 def path_check(path):
     if os.path.exists(path):
         return True
@@ -286,7 +295,7 @@ def path_check(path):
         return False
 
 
-def upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt):
+def upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt, headers):
     try:
         bucket = s3.lookup(bucket)
         key = bucket.new_key(obj)
@@ -294,7 +303,9 @@ def upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt):
             for meta_key in metadata.keys():
                 key.set_metadata(meta_key, metadata[meta_key])
 
-        key.set_contents_from_filename(src, encrypt_key=encrypt)
+        key.set_contents_from_filename(src, encrypt_key=encrypt, headers=headers)
+        for acl in module.params.get('permission'):
+            key.set_acl(acl)
         url = key.generate_url(expiry)
         module.exit_json(msg="PUT operation complete", url=url, changed=True)
     except s3.provider.storage_copy_error, e:
@@ -353,13 +364,6 @@ def is_walrus(s3_url):
     else:
         return False
 
-def get_md5_digest(local_file):
-    md5 = hashlib.md5()
-    with open(local_file, 'rb') as f:
-        for data in f.read(1024 ** 2):
-            md5.update(data)
-    return md5.hexdigest()
-
 
 def main():
     argument_spec = ec2_argument_spec()
@@ -368,11 +372,13 @@ def main():
             dest           = dict(default=None),
             encrypt        = dict(default=True, type='bool'),
             expiry         = dict(default=600, aliases=['expiration']),
+            headers        = dict(type='dict'),
             marker         = dict(default=None),
             max_keys       = dict(default=1000),
             metadata       = dict(type='dict'),
             mode           = dict(choices=['get', 'put', 'delete', 'create', 'geturl', 'getstr', 'delobj', 'list'], required=True),
             object         = dict(),
+            permission     = dict(type='list', default=['private']),
             version        = dict(default=None),
             overwrite      = dict(aliases=['force'], default='always'),
             prefix         = dict(default=None),
@@ -391,6 +397,7 @@ def main():
     expiry = int(module.params['expiry'])
     if module.params.get('dest'):
         dest = os.path.expanduser(module.params.get('dest'))
+    headers = module.params.get('headers')
     marker = module.params.get('marker')
     max_keys = module.params.get('max_keys')
     metadata = module.params.get('metadata')
@@ -403,17 +410,15 @@ def main():
     s3_url = module.params.get('s3_url')
     src = module.params.get('src')
 
-    if overwrite not in  ['always', 'never', 'different']: 
-        if module.boolean(overwrite): 
-            overwrite = 'always' 
-        else: 
-            overwrite='never'
+    for acl in module.params.get('permission'):
+        if acl not in CannedACLStrings:
+            module.fail_json(msg='Unknown permission specified: %s' % str(acl))
 
-    if overwrite not in  ['always', 'never', 'different']: 
-        if module.boolean(overwrite): 
-            overwrite = 'always' 
-        else: 
-            overwrite='never'
+    if overwrite not in ['always', 'never', 'different']:
+        if module.boolean(overwrite):
+            overwrite = 'always'
+        else:
+            overwrite = 'never'
 
     region, ec2_url, aws_connect_kwargs = get_aws_connection_info(module)
 
@@ -432,6 +437,12 @@ def main():
     if not s3_url and 'S3_URL' in os.environ:
         s3_url = os.environ['S3_URL']
 
+    # bucket names with .'s in them need to use the calling_format option,
+    # otherwise the connection will fail. See https://github.com/boto/boto/issues/2836
+    # for more details.
+    if '.' in bucket:
+        aws_connect_kwargs['calling_format'] = OrdinaryCallingFormat()
+
     # Look at s3_url and tweak connection settings
     # if connecting to Walrus or fakes3
     try:
@@ -448,7 +459,8 @@ def main():
             walrus = urlparse.urlparse(s3_url).hostname
             s3 = boto.connect_walrus(walrus, **aws_connect_kwargs)
         else:
-            s3 = boto.s3.connect_to_region(location, is_secure=True, calling_format=OrdinaryCallingFormat(), **aws_connect_kwargs)
+            aws_connect_kwargs['is_secure'] = True
+            s3 = connect_to_aws(boto.s3, location, **aws_connect_kwargs)
             # use this as fallback because connect_to_region seems to fail in boto + non 'classic' aws accounts in some cases
             if s3 is None:
                 s3 = boto.connect_s3(**aws_connect_kwargs)
@@ -467,7 +479,7 @@ def main():
         # First, we check to see if the bucket exists, we get "bucket" returned.
         bucketrtn = bucket_check(module, s3, bucket)
         if bucketrtn is False:
-            module.fail_json(msg="Target bucket cannot be found", failed=True)
+            module.fail_json(msg="Source bucket cannot be found", failed=True)
 
         # Next, we check to see if the key in the bucket exists. If it exists, it also returns key_matches md5sum check.
         keyrtn = key_check(module, s3, bucket, obj, version=version)
@@ -477,16 +489,15 @@ def main():
             else:
                 module.fail_json(msg="Key %s does not exist."%obj, failed=True)
 
-        # If the destination path doesn't exist, no need to md5um etag check, so just download.
+        # If the destination path doesn't exist or overwrite is True, no need to do the md5um etag check, so just download.
         pathrtn = path_check(dest)
-        if pathrtn is False:
+        if pathrtn is False or overwrite == 'always':
             download_s3file(module, s3, bucket, obj, dest, retries, version=version)
 
         # Compare the remote MD5 sum of the object with the local dest md5sum, if it already exists.
         if pathrtn is True:
             md5_remote = keysum(module, s3, bucket, obj, version=version)
-            md5_local = get_md5_digest(dest)
-
+            md5_local = module.md5(dest)
             if md5_local == md5_remote:
                 sum_matches = True
                 if overwrite == 'always':
@@ -505,16 +516,11 @@ def main():
         if sum_matches is True and overwrite == 'never':
             module.exit_json(msg="Local and remote object are identical, ignoring. Use overwrite parameter to force.", changed=False)
 
-        # At this point explicitly define the overwrite condition.
-        if sum_matches is True and pathrtn is True and overwrite == 'always':
-            download_s3file(module, s3, bucket, obj, dest, retries, version=version)
-
     # if our mode is a PUT operation (upload), go through the procedure as appropriate ...
     if mode == 'put':
 
         # Use this snippet to debug through conditionals:
 #       module.exit_json(msg="Bucket return %s"%bucketrtn)
-#       sys.exit(0)
 
         # Lets check the src path.
         pathrtn = path_check(src)
@@ -529,29 +535,29 @@ def main():
         # Lets check key state. Does it exist and if it does, compute the etag md5sum.
         if bucketrtn is True and keyrtn is True:
                 md5_remote = keysum(module, s3, bucket, obj)
-                md5_local = get_md5_digest(src)
+                md5_local = module.md5(src)
 
                 if md5_local == md5_remote:
                     sum_matches = True
                     if overwrite == 'always':
-                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt)
+                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt, headers)
                     else:
                         get_download_url(module, s3, bucket, obj, expiry, changed=False)
                 else:
                     sum_matches = False
                     if overwrite in ('always', 'different'):
-                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt)
+                        upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt, headers)
                     else:
                         module.exit_json(msg="WARNING: Checksums do not match. Use overwrite parameter to force upload.")
 
         # If neither exist (based on bucket existence), we can create both.
         if bucketrtn is False and pathrtn is True:
             create_bucket(module, s3, bucket, location)
-            upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt)
+            upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt, headers)
 
         # If bucket exists but key doesn't, just upload.
         if bucketrtn is True and pathrtn is True and keyrtn is False:
-            upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt)
+            upload_s3file(module, s3, bucket, obj, src, expiry, metadata, encrypt, headers)
 
     # Delete an object from a bucket, not the entire bucket
     if mode == 'delobj':
