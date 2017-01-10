@@ -1,0 +1,11 @@
+- install: ansible==2.2.0
+  target: tmp/
+  no-deps: true
+
+- install: PyYAML==3.12
+  target: tmp/
+  no-deps: true
+
+- install: paramiko==2.1.1
+  target: tmp/
+  no-deps: true
