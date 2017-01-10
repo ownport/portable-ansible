@@ -2,11 +2,11 @@
 
 ## Requirements
 
-- paramiko
 - jinja2
 - PyYAML
 - setuptools
-- pycrypto >= 2.6
+- pycrypto >= 2.6 (optional)
+- paramiko (optional)
 
 ## Installation
 
