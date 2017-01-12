@@ -1,0 +1,14 @@
+
+env:
+  - LOCAL_REPOS_HOST=172.17.0.2
+  - HTTP_PROXY=http://172.17.0.2:8118/
+  - PIP_OPTS="--index-url=http://${LOCAL_REPOS_HOST}/repo/pypi/simple/ --trusted-host=${LOCAL_REPOS_HOST}"
+
+docker-images:
+  python:2.7: ownport/python-dev:2.7
+  python:3.5: ownport/python-dev:3.5
+
+docker-opts:
+  name: local-ci
+  hostname: local-cli
+  # net: docker.env
