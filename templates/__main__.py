@@ -16,12 +16,38 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-
 ########################################################
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-__rquires__ = ['ansible']
+import sys
+import os.path
+
+
+def clean_syspath(*paths):
+    result = []
+    for p in sys.path:
+        if p.endswith('site-packages'):
+            continue
+        if p.endswith('dist-packages'):
+            continue
+        if p.endswith('lib-old'):
+            continue
+        if p.endswith('lib-tk'):
+            continue
+        if p.endswith('gtk-2.0'):
+            continue
+        if p.endswith('ansible'):
+            continue
+        result.append(p)
+    return result
+
+
+sys.path = clean_syspath()
+sys.path.insert(0, os.path.dirname(os.path.realpath(os.path.abspath(__file__))))
+
+
+__requires__ = ['ansible']
 try:
     import pkg_resources
 except Exception:
