@@ -39,6 +39,16 @@ compile: clean pkgstack deps
 		rm bin/$(PROJECT_NAME_BIN).zip && \
 		chmod a+x bin/$(PROJECT_NAME_BIN)
 
+compile-from-tmp:
+	@ echo "[INFO] Compiling to binary from temporary directory, $(PROJECT_NAME_BIN)"
+	@ mkdir -p $(shell pwd)/bin
+	@ touch $(shell pwd)/tmp/__init__.py
+	@ cd $(shell pwd)/tmp/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
+	@ echo '#!$(PYTHON)' > bin/$(PROJECT_NAME_BIN) && \
+		cat bin/$(PROJECT_NAME_BIN).zip >> bin/$(PROJECT_NAME_BIN) && \
+		rm bin/$(PROJECT_NAME_BIN).zip && \
+		chmod a+x bin/$(PROJECT_NAME_BIN)
+
 
 run-local-ci:
 	@ local-ci -r $(shell pwd) -s $(shell pwd)/.local-ci.yml
