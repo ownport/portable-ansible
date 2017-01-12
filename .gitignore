@@ -4,3 +4,4 @@
 bin/
 ansible/
 tmp/
+local-ci/
