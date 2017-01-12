@@ -1,4 +1,6 @@
 *.pyc
 
+# service directories
 bin/
 ansible/
+tmp/
