@@ -52,7 +52,7 @@ $
 ## How to run
 
 ```sh
-$ PYTHONLIB=ansible/ python ansible localhost -m ping
+$ python ansible localhost -m ping
  [WARNING]: provided hosts list is empty, only localhost is available
 
 localhost | SUCCESS => {
