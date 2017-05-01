@@ -9,7 +9,24 @@
 - pycrypto >= 2.6 (optional)
 - paramiko-2.1.1 (optional)
 
-## Installation
+## How to install and use
+
+You just need to download latest version of portable-ansible tarball (.tar.bz2) from
+Releases page https://github.com/ownport/portable-ansible/releases and unpack the files
+
+```sh
+$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.3.0.0/ansible.tar.bz2
+$ tar -xjf ansible.tar.bz2
+$ python ansible localhost -m ping
+ [WARNING]: provided hosts list is empty, only localhost is available
+
+localhost | SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+```
+
+## For developers
 
 ```sh
 $ make prepare
@@ -47,18 +64,6 @@ Collecting six==1.10.0
 Installing collected packages: six
 Successfully installed six-1.10.0
 $
-```
-
-## How to run
-
-```sh
-$ python ansible localhost -m ping
- [WARNING]: provided hosts list is empty, only localhost is available
-
-localhost | SUCCESS => {
-    "changed": false,
-    "ping": "pong"
-}
 ```
 
 ## Links
