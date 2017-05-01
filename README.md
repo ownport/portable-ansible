@@ -2,38 +2,63 @@
 
 ## Requirements
 
-- jinja2
-- PyYAML
+- ansible-2.3.0.0
+- jinja2-2.9.4
+- PyYAML-3.12
 - setuptools
 - pycrypto >= 2.6 (optional)
-- paramiko (optional)
+- paramiko-2.1.1 (optional)
 
 ## Installation
 
 ```sh
-$ ./install.sh
-[INFO] Prepare environment for installation
-[INFO] Prepare Ansible distribution, version 2.0.2.0
-[INFO] Prepare Ansible Core modules, latest version
-[INFO] Prepare Ansible Extra modules, latest version
-[INFO] Prepare Jinja2, version 2.8
-[INFO] Prepare PyYAML, version 3.11
-[INFO] Prepare MarkupSafe, version 0.23
-[INFO] Install Ansible
-[INFO] Remove temporary directories
-[INFO] Installation is completed
+$ make prepare
+[INFO] Cleaning directory: /media/dev/github/portable-ansible/bin
+[INFO] Cleaning directory: /media/dev/github/portable-ansible/lib
+[INFO] Cleaning directory: /media/dev/github/portable-ansible/ansible
+--2017-05-01 08:37:35--  https://github.com/ownport/pkgstack/releases/download/v0.1.9/pkgstack
+...
+['install', '--target', 'ansible/', '--no-deps', 'ansible==2.3.0.0']
+Collecting ansible==2.3.0.0
+Installing collected packages: ansible
+Successfully installed ansible-2.3.0.0
+Package: {'target': 'ansible/', 'install': 'PyYAML==3.12', 'no-deps': True}
+['install', '--target', 'ansible/', '--no-deps', 'PyYAML==3.12']
+Collecting PyYAML==3.12
+Installing collected packages: PyYAML
+Successfully installed PyYAML-3.12
+Package: {'target': 'ansible/', 'install': 'paramiko==2.1.1', 'no-deps': True}
+['install', '--target', 'ansible/', '--no-deps', 'paramiko==2.1.1']
+Collecting paramiko==2.1.1
+  Using cached paramiko-2.1.1-py2.py3-none-any.whl
+Installing collected packages: paramiko
+Successfully installed paramiko-2.1.1
+Package: {'target': 'ansible/', 'install': 'jinja2==2.9.4'}
+['install', '--target', 'ansible/', 'jinja2==2.9.4']
+Collecting jinja2==2.9.4
+  Using cached Jinja2-2.9.4-py2.py3-none-any.whl
+Collecting MarkupSafe>=0.23 (from jinja2==2.9.4)
+Installing collected packages: MarkupSafe, jinja2
+Successfully installed MarkupSafe-1.0 jinja2-2.9.4
+Package: {'target': 'ansible/', 'install': 'six==1.10.0', 'no-deps': True}
+['install', '--target', 'ansible/', '--no-deps', 'six==1.10.0']
+Collecting six==1.10.0
+  Using cached six-1.10.0-py2.py3-none-any.whl
+Installing collected packages: six
+Successfully installed six-1.10.0
 $
 ```
 
 ## How to run
 
 ```sh
-$ PYTHONPATH=lib/ bin/ansible localhost -m ping
-localhost | success >> {
+$ PYTHONLIB=ansible/ python ansible localhost -m ping
+ [WARNING]: provided hosts list is empty, only localhost is available
+
+localhost | SUCCESS => {
     "changed": false,
     "ping": "pong"
 }
-$  
 ```
 
 ## Links

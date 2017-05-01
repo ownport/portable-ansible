@@ -9,12 +9,13 @@ clean:
 	@ rm -rf $(shell pwd)/bin
 	@ echo "[INFO] Cleaning directory:" $(shell pwd)/lib
 	@ rm -rf $(shell pwd)/lib
-	@ echo "[INFO] Cleaning directory:" $(shell pwd)/tmp
-	@ rm -rf $(shell pwd)/tmp
+	@ echo "[INFO] Cleaning directory:" $(shell pwd)/ansible
+	@ rm -rf $(shell pwd)/ansible
 
 deps: clean
 	@ $(shell pwd)/bin/pkgstack -p $(shell pwd)/conf/ansible.yml
-	@ cp $(shell pwd)/templates/__main__.py $(shell pwd)/tmp/
+	@ cp $(shell pwd)/templates/__main__.py $(shell pwd)/ansible/
+	# @ cp $(shell pwd)/templates/ansible-compat-six-init.py $(shell pwd)/ansible/ansible/compat/six/__init__.py
 
 
 pkgstack:
@@ -28,22 +29,24 @@ pkgstack:
 		echo "[INFO] pkgstack founded in $(shell pwd)/bin"; \
 	fi
 
+prepare: clean pkgstack deps
 
-compile: clean pkgstack deps
+
+compile-bin: clean pkgstack deps
 	@ echo "[INFO] Compiling to binary, $(PROJECT_NAME_BIN)"
 	@ mkdir -p $(shell pwd)/bin
-	@ touch $(shell pwd)/tmp/__init__.py
-	@ cd $(shell pwd)/tmp/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
+	@ touch $(shell pwd)/ansible/__init__.py
+	@ cd $(shell pwd)/ansible/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
 	@ echo '#!$(PYTHON)' > bin/$(PROJECT_NAME_BIN) && \
 		cat bin/$(PROJECT_NAME_BIN).zip >> bin/$(PROJECT_NAME_BIN) && \
 		rm bin/$(PROJECT_NAME_BIN).zip && \
 		chmod a+x bin/$(PROJECT_NAME_BIN)
 
-compile-from-tmp:
+compile-bin-from-ansible-dir:
 	@ echo "[INFO] Compiling to binary from temporary directory, $(PROJECT_NAME_BIN)"
 	@ mkdir -p $(shell pwd)/bin
-	@ touch $(shell pwd)/tmp/__init__.py
-	@ cd $(shell pwd)/tmp/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
+	@ touch $(shell pwd)/ansible/__init__.py
+	@ cd $(shell pwd)/ansible/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
 	@ echo '#!$(PYTHON)' > bin/$(PROJECT_NAME_BIN) && \
 		cat bin/$(PROJECT_NAME_BIN).zip >> bin/$(PROJECT_NAME_BIN) && \
 		rm bin/$(PROJECT_NAME_BIN).zip && \
