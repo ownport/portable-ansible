@@ -5,3 +5,4 @@ bin/
 ansible/
 tmp/
 .local-ci/
+portable-ansible*.tar.*
