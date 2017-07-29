@@ -5,3 +5,6 @@ bin/
 ansible/
 tmp/
 .local-ci/
+
+# IDE
+.idea/
