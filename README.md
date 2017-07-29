@@ -26,6 +26,13 @@ localhost | SUCCESS => {
 }
 ```
 
+If you need to run ansible playbooks, after having extracted the tarball contents:
+
+```sh
+$ ln -s ansible ansible-playbook
+$ python ansible-playbook playbook.yml
+```
+
 ## For developers
 
 ```sh
