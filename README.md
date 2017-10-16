@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- ansible-2.3.0.0
+- ansible-2.4.0.0
 - jinja2-2.9.4
 - PyYAML-3.12
 - setuptools
