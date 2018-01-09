@@ -1,8 +1,8 @@
-# Self-contained Ansible distribution
+# Self-contained Ansible 2.4.2 distribution
 
 ## Requirements
 
-- ansible-2.4.0.0
+- ansible-2.4.2.0
 - jinja2-2.9.4
 - PyYAML-3.12
 - setuptools
@@ -15,7 +15,7 @@ You just need to download latest version of portable-ansible tarball (.tar.bz2) 
 Releases page https://github.com/ownport/portable-ansible/releases and unpack the files
 
 ```sh
-$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.3.0.0/ansible.tar.bz2
+$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.4.2.0/ansible.tar.bz2
 $ tar -xjf ansible.tar.bz2
 $ python ansible localhost -m ping
  [WARNING]: provided hosts list is empty, only localhost is available
@@ -71,6 +71,8 @@ Collecting six==1.10.0
 Installing collected packages: six
 Successfully installed six-1.10.0
 $
+
+$ make tarball
 ```
 
 ## Links

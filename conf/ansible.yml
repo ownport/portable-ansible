@@ -1,4 +1,4 @@
-- install: ansible==2.4.0.0
+- install: ansible==2.4.2.0
   target: ansible/
   no-deps: true
 
