@@ -14,7 +14,7 @@ You just need to download latest version of portable-ansible tarball (.tar.bz2) 
 Releases page https://github.com/ownport/portable-ansible/releases and unpack the files
 
 ```sh
-$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.4.2.0/ansible.tar.bz2 -O ansible.tar.bz2
+$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.4.2/portable-ansible-2.4.2.0.tar.bz2 -O ansible.tar.bz2
 $ tar -xjf ansible.tar.bz2
 $ python ansible localhost -m ping
  [WARNING]: provided hosts list is empty, only localhost is available
