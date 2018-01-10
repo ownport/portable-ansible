@@ -34,30 +34,10 @@ pkgstack:
 
 prepare: clean pkgstack deps
 
+prepare-in-docker:
+	docker run -ti --rm --name ansible-build \
+		-v $(shell pwd):/data \
+		alpine:3.7 /bin/sh -c "apk add --no-cache python py2-pip make && cd /data && make prepare"
 
-compile-bin: clean pkgstack deps
-	@ echo "[INFO] Compiling to binary, $(PROJECT_NAME_BIN)"
-	@ mkdir -p $(shell pwd)/bin
-	@ touch $(shell pwd)/ansible/__init__.py
-	@ cd $(shell pwd)/ansible/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
-	@ echo '#!$(PYTHON)' > bin/$(PROJECT_NAME_BIN) && \
-		cat bin/$(PROJECT_NAME_BIN).zip >> bin/$(PROJECT_NAME_BIN) && \
-		rm bin/$(PROJECT_NAME_BIN).zip && \
-		chmod a+x bin/$(PROJECT_NAME_BIN)
-
-compile-bin-from-ansible-dir:
-	@ echo "[INFO] Compiling to binary from temporary directory, $(PROJECT_NAME_BIN)"
-	@ mkdir -p $(shell pwd)/bin
-	@ touch $(shell pwd)/ansible/__init__.py
-	@ cd $(shell pwd)/ansible/; zip --quiet -r $(shell pwd)/bin/$(PROJECT_NAME_BIN) *
-	@ echo '#!$(PYTHON)' > bin/$(PROJECT_NAME_BIN) && \
-		cat bin/$(PROJECT_NAME_BIN).zip >> bin/$(PROJECT_NAME_BIN) && \
-		rm bin/$(PROJECT_NAME_BIN).zip && \
-		chmod a+x bin/$(PROJECT_NAME_BIN)
-
-
-run-local-ci:
-	@ local-ci -r $(shell pwd) -s $(shell pwd)/.local-ci.yml
-
-tarball: prepare
+tarball: prepare-in-docker
 	tar cvjf $(TARBALL_NAME).tar.bz2 ansible
