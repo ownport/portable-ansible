@@ -1,4 +1,4 @@
-- install: ansible==2.4.2.0
+- install: ansible==2.5.2.0
   target: ansible/
   no-deps: true
 
@@ -6,13 +6,13 @@
   target: ansible/
   no-deps: true
 
-- install: paramiko==2.1.1
+- install: paramiko==2.4.1
   target: ansible/
   no-deps: true
 
-- install: jinja2==2.9.4
+- install: jinja2==2.10
   target: ansible/
 
-- install: six==1.10.0
+- install: six==1.11.0
   target: ansible/
   no-deps: true
