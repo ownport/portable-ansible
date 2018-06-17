@@ -1,43 +1,98 @@
-PYTHON ?= /usr/bin/env python2
-PROJECT_NAME_BIN ?= ansible
-PROJECT_NAME_SRC ?= ansible
 
-PKGSTACK_VERSION ?= 0.1.9
+VERSION ?= 'v0.1.0'
+TARBALL_NAME ?= portable-ansible-$(VERSION)
 
-ANSIBLE_VERSION = $(shell awk '/ansible==.*$$/ {split($$3,a,"=="); print a[2]}' conf/ansible.yml)
-TARBALL_NAME = portable-ansible-$(ANSIBLE_VERSION)
 
+.PHONY: clean
 clean:
-	@ echo "[INFO] Cleaning directory:" $(shell pwd)/bin
-	@ rm -rf $(shell pwd)/bin
-	@ echo "[INFO] Cleaning directory:" $(shell pwd)/lib
-	@ rm -rf $(shell pwd)/lib
-	@ echo "[INFO] Cleaning directory:" $(shell pwd)/ansible
-	@ rm -rf $(shell pwd)/ansible
+	@ echo "[INFO] Cleaning directory:" $(shell pwd)/target
+	@ rm -rf \
+		$(shell pwd)/target 
 
-deps: clean
-	@ $(PYTHON) $(shell pwd)/bin/pkgstack -p $(shell pwd)/conf/ansible.yml
-	@ cp $(shell pwd)/templates/__main__.py $(shell pwd)/ansible/
+
+.PHONY: post-clean
+post-clean:
+	echo '[INFO] Removing extra dirs and files' && \
+		rm -rf \
+			$(shell pwd)/target/ansible/*.dist-info \
+			$(shell pwd)/target/ansible/*.egg-info \
+			$(shell pwd)/target/ansible/*.gz \
+			$(shell pwd)/target/ansible/*.whl \
+			$(shell pwd)/target/ansible/bin && \
+	echo '[INFO] Removing __pycache__ dirs' && \
+		find $(shell pwd)/target/ansible/ -path '*/__pycache__/*' -delete
+		find $(shell pwd)/target/ansible/ -type d -name '__pycache__' -empty -delete
+
+
+.PHONY: deps
+deps: 
+	@ mkdir -p $(shell pwd)/target/ansible/ && \
+		cp $(shell pwd)/templates/__main__.py $(shell pwd)/target/ansible/
 	# @ cp $(shell pwd)/templates/ansible-compat-six-init.py $(shell pwd)/ansible/ansible/compat/six/__init__.py
 
 
-pkgstack:
-	@ if [ ! -f $(shell pwd)/bin/pkgstack ]; \
-	then \
-		mkdir -p $(shell pwd)/bin/ && \
-		wget https://github.com/ownport/pkgstack/releases/download/v$(PKGSTACK_VERSION)/pkgstack \
-			-O $(shell pwd)/bin/pkgstack && \
-		chmod +x $(shell pwd)/bin/pkgstack; \
-	else \
-		echo "[INFO] pkgstack found in $(shell pwd)/bin"; \
-	fi
+.PHONY: prepare-py2
+prepare-py2: clean deps
+	@ echo '[INFO] Installing Ansible packages' && \
+		pip install --no-deps \
+			--no-compile \
+			-r conf/requirements \
+			--target $(shell pwd)/target/ansible/
 
-prepare: clean pkgstack deps
 
-prepare-in-docker:
-	docker run -ti --rm --name ansible-build \
-		-v $(shell pwd):/data \
-		alpine:3.7 /bin/sh -c "apk add --no-cache python py2-pip make && cd /data && make prepare"
+.PHONY: prepare-py3
+prepare-py3: clean deps
+# prepare: clean pkgstack deps
+	@ echo '[INFO] Installing Ansible packages' && \
+		pip3 install --no-deps \
+			--no-compile \
+			--requirement conf/requirements \
+			--target $(shell pwd)/target/ansible/
 
-tarball: prepare-in-docker
-	tar cvjf $(TARBALL_NAME).tar.bz2 ansible
+
+.PHONY: prepare-in-docker-py2
+prepare-in-docker-py2:
+	@ echo '[INFO] Run docker container for building Ansible packages' && \
+		docker run -ti --rm --name ansible-build \
+			-v $(shell pwd):/data \
+			bitnami/minideb:latest /bin/sh -c "apt update && \
+					apt install -y --no-install-recommends \
+						python \
+						python-pip \
+						make && \
+					pip install --upgrade \
+						pip \
+						setuptools && \
+					cd /data && make prepare-py2 && make post-clean"
+
+.PHONY: prepare-in-docker-py3
+prepare-in-docker-py3:
+	@ echo '[INFO] Run docker container for building Ansible packages' && \
+		docker run -ti --rm --name ansible-build \
+			-v $(shell pwd):/data \
+			bitnami/minideb:latest /bin/sh -c "apt update && \
+					apt install -y --no-install-recommends \
+						python3 \
+						python3-pip \
+						make && \
+					pip3 install --upgrade \
+						pip \
+						setuptools && \
+					cd /data && make prepare-py3 && make post-clean"
+
+.PHONY: tarball-py2 
+tarball-py2: prepare-in-docker-py2
+	@ echo '[INFO] Building tarball' && \
+		mkdir -p $(shell pwd)/builds && \
+		tar cjf builds/$(TARBALL_NAME)-py2.tar.bz2 -C $(shell pwd)/target/ ansible
+
+
+.PHONY: tarball-py3
+tarball-py3: prepare-in-docker-py3
+	@ echo '[INFO] Building tarball' && \
+		mkdir -p $(shell pwd)/builds && \
+		tar cjf builds/$(TARBALL_NAME)-py3.tar.bz2 -C $(shell pwd)/target/ ansible
+
+.PHONY: tarballs
+tarballs: tarball-py2 tarball-py3
+	@ echo '[INFO] Completed' 

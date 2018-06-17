@@ -1,12 +1,20 @@
-# Self-contained Ansible 2.5.2 distribution
+# Self-contained Ansible distribution
 
-## Requirements
+Ansible package with required python modules. No need to install, just download, unpack and use. The main idea of this package is to run Ansible playbooks on local machine
 
-- ansible-2.5.2.0
-- jinja2-2.10
-- PyYAML-3.12
-- paramiko-2.4.1
-- six-1.11.0
+
+
+## Included in the distribution
+
+Version: 0.1.0
+
+| Package  | Version |
+| -------- | ------- |
+| ansible  | 2.5.5   |
+| jinja2   | 2.10    |
+| PyYAML   | 3.12    |
+| paramiko | 2.4.1   |
+| six      | 1.11.0  |
 
 ## How to install and use
 
@@ -14,7 +22,7 @@ You just need to download latest version of portable-ansible tarball (.tar.bz2) 
 Releases page https://github.com/ownport/portable-ansible/releases and unpack the files
 
 ```sh
-$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.5.2/portable-ansible-2.5.2.0.tar.bz2 -O ansible.tar.bz2
+$ wget https://github.com/ownport/portable-ansible/releases/download/ansible-2.5.5/portable-ansible-v0.1.0-py2.tar.bz2 -O ansible.tar.bz2
 $ tar -xjf ansible.tar.bz2
 $ python ansible localhost -m ping
  [WARNING]: provided hosts list is empty, only localhost is available
@@ -34,14 +42,25 @@ $ python ansible-playbook playbook.yml
 
 ## For developers
 
-to collect all packages in ansible/ directory
-```sh
-$ make prepare-in-docker
+to create tarball with required packages just run
+
+For python2
 ```
-or to create tarball with required packages
+$ make tarball-py2
 ```
-$ make tarball
+For python3
 ```
+$ make tarball-py3
+```
+For both python versions
+```
+$ make tarballs
+```
+
+## Changelog
+
+All notable changes to this project will be documented in the file CHANGELOG.md
+
 
 ## Links
 

@@ -1,0 +1,6 @@
+ansible==2.5.5
+PyYAML==3.12
+paramiko==2.4.1
+jinja2==2.10
+six==1.11.0
+markupsafe==1.0
