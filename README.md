@@ -6,11 +6,11 @@ Ansible package with required python modules. No need to install, just download,
 
 ## Included in the distribution
 
-Version: 0.2.0
+Version: 0.2.1
 
 | Package  | Version |
 | -------- | ------- |
-| ansible  | 2.7.5   |
+| ansible  | 2.7.8   |
 | jinja2   | 2.10    |
 | PyYAML   | 3.12    |
 | paramiko | 2.4.1   |
