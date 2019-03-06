@@ -44,7 +44,17 @@ def clean_syspath(*paths):
 
 
 sys.path = clean_syspath()
-sys.path.insert(0, os.path.dirname(os.path.realpath(os.path.abspath(__file__))))
+
+ansible_path = os.path.dirname(os.path.realpath(os.path.abspath(__file__)))
+sys.path.insert(0, ansible_path)
+
+# add extras/ directory in ansible path for custom python packages
+if sys.platform in ['win32', 'cygwin']:
+    sys.path.insert(0, ansible_path + '\\extras')
+elif sys.platform in ['darwin']:
+    sys.path.insert(0, ansible_path + '/extras')
+else:
+    sys.path.insert(0, ansible_path + '/extras')
 
 
 __requires__ = ['ansible']

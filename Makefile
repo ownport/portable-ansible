@@ -1,5 +1,5 @@
 
-VERSION ?= 'v0.2.1'
+VERSION ?= 'v0.2.2'
 TARBALL_NAME ?= portable-ansible-$(VERSION)
 
 
@@ -28,6 +28,7 @@ post-clean:
 deps: 
 	@ mkdir -p $(shell pwd)/target/ansible/ && \
 		cp $(shell pwd)/templates/__main__.py $(shell pwd)/target/ansible/
+	@ mkdir -p $(shell pwd)/target/ansible/extras/
 	# @ cp $(shell pwd)/templates/ansible-compat-six-init.py $(shell pwd)/ansible/ansible/compat/six/__init__.py
 
 

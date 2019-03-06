@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- [x] added extras/ directory for custom python modules
+
 ## 0.2.1
 
 - [x] Ansible-2.7.8

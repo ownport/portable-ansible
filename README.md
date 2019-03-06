@@ -6,7 +6,7 @@ Ansible package with required python modules. No need to install, just download,
 
 ## Included in the distribution
 
-Version: 0.2.1
+Version: 0.2.2
 
 | Package  | Version |
 | -------- | ------- |
@@ -38,6 +38,17 @@ If you need to run ansible playbooks, after having extracted the tarball content
 ```sh
 $ ln -s ansible ansible-playbook
 $ python ansible-playbook playbook.yml
+```
+
+## Supporting additional python packages
+
+Install python packages into `ansible/extras` directory
+```
+pip install -t ansible/extras <package>
+```
+or 
+```
+pip install -t ansible/extras -r requirements.txt
 ```
 
 ## For developers
