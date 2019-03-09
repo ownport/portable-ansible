@@ -51,6 +51,12 @@ or
 pip install -t ansible/extras -r requirements.txt
 ```
 
+Instead of installing the python packages to `ansible/extras`, you can also install them in user directory to be available for ansible:
+```
+pip install --user -r requirements.txt
+```
+
+
 ## For developers
 
 to create tarball with required packages just run
