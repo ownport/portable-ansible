@@ -1,4 +1,4 @@
-ansible==2.7.8
+ansible==2.8.0
 PyYAML==3.12
 paramiko==2.4.1
 jinja2==2.10
