@@ -6,16 +6,16 @@ Ansible package with required python modules. No need to install, just download,
 
 ## Included in the distribution
 
-Version: 0.2.2
+Version: 0.3.0
 
 | Package  | Version |
 | -------- | ------- |
-| ansible  | 2.7.8   |
-| jinja2   | 2.10    |
+| ansible  | 2.8.0   |
+| jinja2   | 2.10.1  |
 | PyYAML   | 3.12    |
-| paramiko | 2.4.1   |
-| six      | 1.11.0  |
-| cryptography | 2.4.2 |
+| paramiko | 2.4.2   |
+| six      | 1.12.0  |
+| cryptography | 2.7 |
 
 ## How to install and use
 
@@ -23,7 +23,7 @@ You just need to download latest version of portable-ansible tarball (.tar.bz2) 
 Releases page https://github.com/ownport/portable-ansible/releases and unpack the files
 
 ```sh
-$ wget https://github.com/ownport/portable-ansible/releases/download/v0.2.1/portable-ansible-v0.2.1-py2.tar.bz2 -O ansible.tar.bz2
+$ wget https://github.com/ownport/portable-ansible/releases/download/v0.3.0/portable-ansible-v0.3.0-py2.tar.bz2 -O ansible.tar.bz2
 $ tar -xjf ansible.tar.bz2
 $ python ansible localhost -m ping
  [WARNING]: provided hosts list is empty, only localhost is available

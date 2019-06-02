@@ -1,7 +1,7 @@
 ansible==2.8.0
 PyYAML==3.12
-paramiko==2.4.1
-jinja2==2.10
-six==1.11.0
+paramiko==2.4.2
+jinja2==2.10.1
+six==1.12.0
 markupsafe==1.0
-cryptography==2.4.2
+cryptography==2.7

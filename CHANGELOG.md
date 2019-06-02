@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+Upgrade to versions:
+
+- Ansible, 2.8.0
+- PyYAML, 5.1
+- Jinja2, 2.10.1
+- cryptography, 2.7
+- paramiko, 2.4.2
+- six, 1.12.0
+
 ## 0.2.2
 
 - [x] added extras/ directory for custom python modules
