@@ -6,11 +6,11 @@ Ansible package with required python modules. No need to install, just download,
 
 ## Included in the distribution
 
-Version: 0.3.0
+Version: 0.3.1
 
 | Package  | Version |
 | -------- | ------- |
-| ansible  | 2.8.0   |
+| ansible  | 2.8.5   |
 | jinja2   | 2.10.1  |
 | PyYAML   | 3.12    |
 | paramiko | 2.4.2   |
@@ -56,6 +56,22 @@ Instead of installing the python packages to `ansible/extras`, you can also inst
 pip install --user -r requirements.txt
 ```
 
+## Hints
+
+make aliases to portable ansible directory. In the examples below `portable-ansible` installed in `/opt` directory
+```
+ln -s /opt/ansible /opt/ansible-playbook
+```
+
+## Testing
+
+```sh
+python3 /opt/ansible-playbook -i 172.17.0.2,  ~/playbooks/remote-via-ssh-key.yaml
+```
+
+```sh
+python3 /opt/ansible-playbook -i 172.17.0.2, -c paramiko ~/playbooks/remote-via-username-and-password.yaml  --ask-pass
+```
 
 ## For developers
 

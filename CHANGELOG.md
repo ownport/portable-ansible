@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1
+
+- added docker images for testing
+- Upgraded components to versions:
+    - Ansible, 2.8.5
+- Installed new dependencies for access via username/password with paramiko
+    - pyasn1, 0.4.7
+    - asn1crypto, 1.2.0
+    - bcrypt, 3.1.7
+    - cffi, 1.13.0
+    - PyNaCl, 1.3.0
+
 ## 0.3.0
 
 Upgrade to versions:
