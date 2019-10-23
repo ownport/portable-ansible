@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- added test docker image for ansible node (CentOS7) 
+- added new dependency for PY2 distribution
+    - enum
+
 ## 0.3.1
 
 - added docker images for testing

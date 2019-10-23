@@ -1,5 +1,5 @@
 
-VERSION ?= 'v0.3.1'
+VERSION ?= 'v0.3.2'
 TARBALL_NAME ?= portable-ansible-$(VERSION)
 
 
@@ -35,9 +35,9 @@ deps:
 .PHONY: prepare-py2
 prepare-py2: clean deps
 	@ echo '[INFO] Installing Ansible packages' && \
-		pip install --no-deps \
-			--no-compile \
-			-r conf/requirements \
+		pip install --no-deps --no-compile -r conf/requirements \
+			--target $(shell pwd)/target/ansible/
+		pip install --no-deps --no-compile -r conf/requirements.py2 \
 			--target $(shell pwd)/target/ansible/
 
 
