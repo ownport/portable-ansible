@@ -14,7 +14,7 @@ RUN echo "[INFO] Updating yum repo" && \
         chmod 600 /root/.ssh/ansible.id_rsa && \
     echo "[INFO] Install portable-ansible" && \
         mkdir -p /opt/ && \
-        tar xjf /tmp/target/portable-ansible-v0.3.1-py2.tar.bz2 -C /opt/ && \
+        tar xjf /tmp/target/portable-ansible-v0.3.2-py2.tar.bz2 -C /opt/ && \
     echo "[INFO] Remove apt lists" && \
         rm -rf \
             /var/lib/apt/lists/* \

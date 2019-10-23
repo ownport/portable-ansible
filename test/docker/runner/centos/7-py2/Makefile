@@ -1,4 +1,4 @@
-PORTABLE_ANSIBLE_VERSION = "0.3.1"
+PORTABLE_ANSIBLE_VERSION = "0.3.2"
 
 build:
 	@ rm -rf target/ && \
