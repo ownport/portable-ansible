@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3
+
+- updated python versions
+    ansible, 2.8.6
+    PyYAML, 5.1.2
+    paramiko, 2.6.0
+    jinja2, 2.10.3
+    markupsafe, 1.1.1
+
 ## 0.3.2
 
 - added test docker image for ansible node (CentOS7) 

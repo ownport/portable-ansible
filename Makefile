@@ -1,5 +1,5 @@
 
-VERSION ?= 'v0.3.2'
+VERSION ?= 'v0.3.3'
 TARBALL_NAME ?= portable-ansible-$(VERSION)
 
 
