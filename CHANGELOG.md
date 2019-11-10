@@ -5,7 +5,6 @@
 - updated python versions
     ansible, 2.9.0
 
-
 ## 0.3.3
 
 - updated python versions
