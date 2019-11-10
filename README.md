@@ -6,16 +6,22 @@ Ansible package with required python modules. No need to install, just download,
 
 ## Included in the distribution
 
-Version: 0.3.1
+Version: 0.4.0
 
 | Package  | Version |
 | -------- | ------- |
-| ansible  | 2.8.5   |
-| jinja2   | 2.10.1  |
-| PyYAML   | 3.12    |
-| paramiko | 2.4.2   |
+| ansible  | 2.9.0   |
+| jinja2   | 2.10.3  |
+| PyYAML   | 5.1.2   |
+| paramiko | 2.6.0   |
 | six      | 1.12.0  |
-| cryptography | 2.7 |
+| cryptography | 2.8 |
+| pyasn1   | 0.4.7   |
+| asn1crypto | 1.2.0 |
+| bcrypt   | 3.1.7   |
+| cffi     | 1.13.0  |
+| PyNaCl   | 1.3.0   |
+| markupsafe | 1.1.1 |
 
 ## How to install and use
 
