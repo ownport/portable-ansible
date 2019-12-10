@@ -10,16 +10,16 @@ Version: 0.4.0
 
 | Package  | Version |
 | -------- | ------- |
-| ansible  | 2.9.0   |
+| ansible  | 2.9.2   |
 | jinja2   | 2.10.3  |
-| PyYAML   | 5.1.2   |
-| paramiko | 2.6.0   |
-| six      | 1.12.0  |
+| PyYAML   | 5.2     |
+| paramiko | 2.7.1   |
+| six      | 1.13.0  |
 | cryptography | 2.8 |
-| pyasn1   | 0.4.7   |
+| pyasn1   | 0.4.8   |
 | asn1crypto | 1.2.0 |
 | bcrypt   | 3.1.7   |
-| cffi     | 1.13.0  |
+| cffi     | 1.13.2  |
 | PyNaCl   | 1.3.0   |
 | markupsafe | 1.1.1 |
 
@@ -44,6 +44,13 @@ If you need to run ansible playbooks, after having extracted the tarball content
 ```sh
 $ ln -s ansible ansible-playbook
 $ python ansible-playbook playbook.yml
+```
+
+In the same fashion, to have all the ansible commands, run:
+```
+for l in config console doc galaxy inventory playbook pull vault;do
+  ln -s ansible ansible-$l
+done
 ```
 
 ## Supporting additional python packages
