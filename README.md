@@ -6,7 +6,7 @@ Ansible package with required python modules. No need to install, just download,
 
 ## Included in the distribution
 
-Version: 0.4.0
+Version: 0.4.1
 
 | Package  | Version |
 | -------- | ------- |

@@ -1,9 +1,14 @@
 # Changelog
 
-## 0.4.0
+## 0.4.1
 
 - updated python versions
-    ansible, 2.9.0
+    ansible, 2.9.2
+    PyYAML, 5.2
+    paramiko, 2.7.1
+    six, 1.13.0
+    pyasn1, 0.4.8
+    cffi, 1.13.2
 
 ## 0.3.3
 
