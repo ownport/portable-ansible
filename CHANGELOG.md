@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2
+
+- updated python versions
+    ansible, 2.9.10
+    PyYAML, 5.3.1
+    asn1crypto, 1.3.0
+    cffi, 1.14.0
+    PyNaCl, 1.4.0
+    jinja2, 2.11.2
+    six, 1.15.0
+
 ## 0.4.1
 
 - updated python versions
