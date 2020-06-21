@@ -2,8 +2,6 @@
 
 Ansible package with required python modules. No need to install, just download, unpack and use. The main idea of this package is to run Ansible playbooks on local machine
 
-
-
 ## Included in the distribution
 
 Version: 0.4.2
